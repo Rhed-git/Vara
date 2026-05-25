@@ -78,15 +78,15 @@ enum HomeSection: Int, CaseIterable, Identifiable {
 private enum HomeDeckSectionState {
     case topCollapsed
     case activeExpanded
-    case bottomPreview
+    case bottomCollapsed
 
     var isActive: Bool {
         if case .activeExpanded = self { return true }
         return false
     }
 
-    var isPreview: Bool {
-        if case .bottomPreview = self { return true }
+    var isBottomCollapsed: Bool {
+        if case .bottomCollapsed = self { return true }
         return false
     }
 }
@@ -546,26 +546,29 @@ struct ContentView: View {
     private var homePage: some View {
         GeometryReader { geo in
             let topSafe = geo.safeAreaInsets.top
-            let bottomMenuClearance = geo.safeAreaInsets.bottom + 96
-            let menuBreathingRoom: CGFloat = 16
+            let bottomMenuClearance = geo.safeAreaInsets.bottom + 110
+            let menuBreathingRoom: CGFloat = 18
             let tabHeight: CGFloat = 38
             let tabSpacing: CGFloat = homeTransitionPulse ? 12 : 8
             let sections = HomeSection.allCases
             let topSections = sections.filter { $0.rawValue < activeHomeSection.rawValue }
             let bottomSections = sections.filter { $0.rawValue > activeHomeSection.rawValue }
             let topStackOrigin = topSafe + 8
-            let topStackHeight = topSections.isEmpty
+            let topStackBottom = topSections.isEmpty
                 ? CGFloat.zero
-                : CGFloat(topSections.count) * tabHeight + CGFloat(topSections.count - 1) * tabSpacing
+                : topStackOrigin
+                    + CGFloat(topSections.count) * tabHeight
+                    + CGFloat(topSections.count - 1) * tabSpacing
             let bottomStackHeight = bottomSections.isEmpty
                 ? CGFloat.zero
                 : CGFloat(bottomSections.count) * tabHeight + CGFloat(bottomSections.count - 1) * tabSpacing
-            let bottomStackTop = geo.size.height - bottomMenuClearance - menuBreathingRoom - bottomStackHeight
-            let activeTop = topSections.isEmpty ? CGFloat.zero : topStackOrigin + topStackHeight + (homeTransitionPulse ? 18 : 12)
+            let bottomStackLimit = geo.size.height - bottomMenuClearance - menuBreathingRoom
+            let bottomStackTop = bottomStackLimit - bottomStackHeight
+            let activeTop = topSections.isEmpty ? CGFloat.zero : topStackBottom + (homeTransitionPulse ? 18 : 12)
             let activeBottom = bottomSections.isEmpty
-                ? geo.size.height - bottomMenuClearance - menuBreathingRoom
+                ? bottomStackLimit
                 : bottomStackTop - (homeTransitionPulse ? 18 : 12)
-            let activeHeight = max(180, activeBottom - activeTop)
+            let activeHeight = max(0, activeBottom - activeTop)
 
             ZStack(alignment: .top) {
                 ForEach(sections) { section in
@@ -588,10 +591,10 @@ struct ContentView: View {
                     .matchedGeometryEffect(id: "home-shell-\(section.id)", in: homeDeckNamespace)
                     .frame(height: state.isActive ? activeHeight : tabHeight, alignment: .top)
                     .offset(y: state.isActive ? activeTop : position.y)
-                    .scaleEffect(homeDeckScale(for: state), anchor: state.isPreview ? .bottom : .top)
+                    .scaleEffect(homeDeckScale(for: state), anchor: state.isBottomCollapsed ? .bottom : .top)
                     .opacity(homeDeckOpacity(for: state))
                     .shadow(
-                        color: .black.opacity(state.isActive ? (homeTransitionPulse ? 0.30 : 0.24) : (state.isPreview ? 0.08 : 0.14)),
+                        color: .black.opacity(state.isActive ? (homeTransitionPulse ? 0.30 : 0.24) : (state.isBottomCollapsed ? 0.08 : 0.14)),
                         radius: state.isActive ? (homeTransitionPulse ? 22 : 18) : 8,
                         x: 0,
                         y: state.isActive ? (homeTransitionPulse ? 12 : 10) : 4
@@ -613,7 +616,7 @@ struct ContentView: View {
             return .activeExpanded
         }
 
-        return section.rawValue < activeHomeSection.rawValue ? .topCollapsed : .bottomPreview
+        return section.rawValue < activeHomeSection.rawValue ? .topCollapsed : .bottomCollapsed
     }
 
     private func homeDeckScale(for state: HomeDeckSectionState) -> CGFloat {
@@ -622,7 +625,7 @@ struct ContentView: View {
             return homeTransitionPulse ? 0.985 : 1
         case .topCollapsed:
             return 0.995
-        case .bottomPreview:
+        case .bottomCollapsed:
             return 0.97
         }
     }
@@ -631,8 +634,8 @@ struct ContentView: View {
         switch state {
         case .activeExpanded, .topCollapsed:
             return 1
-        case .bottomPreview:
-            return 0.84
+        case .bottomCollapsed:
+            return 0.9
         }
     }
 
@@ -642,7 +645,7 @@ struct ContentView: View {
             return 3
         case .topCollapsed:
             return 2
-        case .bottomPreview:
+        case .bottomCollapsed:
             return 1
         }
     }
@@ -662,7 +665,7 @@ struct ContentView: View {
         bottomStackTop: CGFloat,
         tabHeight: CGFloat,
         tabSpacing: CGFloat
-    ) -> (y: CGFloat, isPreview: Bool) {
+    ) -> (y: CGFloat, isBottomCollapsed: Bool) {
         if let topIndex = topSections.firstIndex(of: section) {
             return (topStackOrigin + CGFloat(topIndex) * (tabHeight + tabSpacing), false)
         }
@@ -696,7 +699,7 @@ struct ContentView: View {
                 .opacity(state.isActive ? 1 : 0.001)
                 .allowsHitTesting(state.isActive)
 
-            homeSectionTab(for: section, isPreview: state.isPreview)
+            homeSectionTab(for: section, isBottomCollapsed: state.isBottomCollapsed)
                 .opacity(state.isActive ? 0.001 : 1)
                 .allowsHitTesting(!state.isActive)
         }
@@ -774,7 +777,7 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private func homeSectionTab(for section: HomeSection, isPreview: Bool) -> some View {
+    private func homeSectionTab(for section: HomeSection, isBottomCollapsed: Bool) -> some View {
         Button {
             setActiveHomeSection(section)
         } label: {
@@ -789,19 +792,19 @@ struct ContentView: View {
         }
         .buttonStyle(.plain)
         .frame(height: 38)
-        .opacity(isPreview ? 0.82 : 1)
+        .opacity(isBottomCollapsed ? 0.9 : 1)
         .background {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(.ultraThinMaterial)
                 .overlay {
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(Color.black.opacity(isPreview ? 0.08 : 0.12))
+                        .fill(Color.black.opacity(isBottomCollapsed ? 0.08 : 0.12))
                 }
                 .overlay {
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
                         .stroke(.white.opacity(0.22), lineWidth: 0.5)
                 }
-                .shadow(color: .black.opacity(isPreview ? 0.08 : 0.14), radius: 8, x: 0, y: 4)
+                .shadow(color: .black.opacity(isBottomCollapsed ? 0.08 : 0.14), radius: 8, x: 0, y: 4)
         }
         .padding(.horizontal, 16)
     }
