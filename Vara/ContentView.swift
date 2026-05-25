@@ -75,22 +75,6 @@ enum HomeSection: Int, CaseIterable, Identifiable {
     }
 }
 
-private enum HomeDeckSectionState {
-    case topCollapsed
-    case activeExpanded
-    case bottomCollapsed
-
-    var isActive: Bool {
-        if case .activeExpanded = self { return true }
-        return false
-    }
-
-    var isBottomCollapsed: Bool {
-        if case .bottomCollapsed = self { return true }
-        return false
-    }
-}
-
 enum Verdict: String {
     case go = "GO"
     case caution = "CAUTION"
@@ -435,7 +419,6 @@ struct ContentView: View {
     @State private var activeHomeSection: HomeSection = .readiness
     @State private var homeTransitionPulse: Bool = false
     @State private var scrollOffset: CGFloat = 0
-    @Namespace private var homeDeckNamespace
 
     // Floating menu state
     @State private var location: String = "Boulder, CO"
@@ -553,56 +536,36 @@ struct ContentView: View {
             let sections = HomeSection.allCases
             let topSections = sections.filter { $0.rawValue < activeHomeSection.rawValue }
             let bottomSections = sections.filter { $0.rawValue > activeHomeSection.rawValue }
-            let topStackOrigin = topSafe + 8
-            let topStackBottom = topSections.isEmpty
-                ? CGFloat.zero
-                : topStackOrigin
-                    + CGFloat(topSections.count) * tabHeight
-                    + CGFloat(topSections.count - 1) * tabSpacing
-            let bottomStackHeight = bottomSections.isEmpty
-                ? CGFloat.zero
-                : CGFloat(bottomSections.count) * tabHeight + CGFloat(bottomSections.count - 1) * tabSpacing
-            let bottomStackLimit = geo.size.height - bottomMenuClearance - menuBreathingRoom
-            let bottomStackTop = bottomStackLimit - bottomStackHeight
-            let activeTop = topSections.isEmpty ? CGFloat.zero : topStackBottom + (homeTransitionPulse ? 18 : 12)
-            let activeBottom = bottomSections.isEmpty
-                ? bottomStackLimit
-                : bottomStackTop - (homeTransitionPulse ? 18 : 12)
-            let activeHeight = max(0, activeBottom - activeTop)
 
-            ZStack(alignment: .top) {
-                ForEach(sections) { section in
-                    let position = homeDeckPosition(
-                        for: section,
-                        topSections: topSections,
-                        bottomSections: bottomSections,
-                        topStackOrigin: topStackOrigin,
-                        bottomStackTop: bottomStackTop,
-                        tabHeight: tabHeight,
-                        tabSpacing: tabSpacing
-                    )
-                    let state = homeDeckState(for: section)
+            VStack(spacing: tabSpacing) {
+                ForEach(topSections) { section in
+                    homeSectionTab(for: section, isBottomCollapsed: false)
+                        .frame(height: tabHeight)
+                        .scaleEffect(0.995)
+                        .opacity(1)
+                }
 
-                    homeDeckSection(
-                        section,
-                        state: state,
-                        topSafe: section == .readiness && state.isActive ? topSafe : 0
-                    )
-                    .matchedGeometryEffect(id: "home-shell-\(section.id)", in: homeDeckNamespace)
-                    .frame(height: state.isActive ? activeHeight : tabHeight, alignment: .top)
-                    .offset(y: state.isActive ? activeTop : position.y)
-                    .scaleEffect(homeDeckScale(for: state), anchor: state.isBottomCollapsed ? .bottom : .top)
-                    .opacity(homeDeckOpacity(for: state))
+                expandedHomeSection(activeHomeSection, topSafe: activeHomeSection == .readiness ? topSafe : 0)
+                    .frame(maxHeight: .infinity, alignment: .top)
+                    .scaleEffect(homeTransitionPulse ? 0.985 : 1, anchor: .top)
                     .shadow(
-                        color: .black.opacity(state.isActive ? (homeTransitionPulse ? 0.30 : 0.24) : (state.isBottomCollapsed ? 0.08 : 0.14)),
-                        radius: state.isActive ? (homeTransitionPulse ? 22 : 18) : 8,
+                        color: .black.opacity(homeTransitionPulse ? 0.30 : 0.24),
+                        radius: homeTransitionPulse ? 22 : 18,
                         x: 0,
-                        y: state.isActive ? (homeTransitionPulse ? 12 : 10) : 4
+                        y: homeTransitionPulse ? 12 : 10
                     )
-                    .zIndex(homeDeckZIndex(for: state))
+                    .clipped()
+
+                ForEach(bottomSections) { section in
+                    homeSectionTab(for: section, isBottomCollapsed: true)
+                        .frame(height: tabHeight)
+                        .scaleEffect(0.97)
+                        .opacity(0.9)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .padding(.top, topSections.isEmpty ? 0 : topSafe + 8)
+            .padding(.bottom, bottomMenuClearance + menuBreathingRoom)
             .clipped()
             .contentShape(Rectangle())
             .simultaneousGesture(homeSectionGesture)
@@ -611,70 +574,11 @@ struct ContentView: View {
         }
     }
 
-    private func homeDeckState(for section: HomeSection) -> HomeDeckSectionState {
-        if section == activeHomeSection {
-            return .activeExpanded
-        }
-
-        return section.rawValue < activeHomeSection.rawValue ? .topCollapsed : .bottomCollapsed
-    }
-
-    private func homeDeckScale(for state: HomeDeckSectionState) -> CGFloat {
-        switch state {
-        case .activeExpanded:
-            return homeTransitionPulse ? 0.985 : 1
-        case .topCollapsed:
-            return 0.995
-        case .bottomCollapsed:
-            return 0.97
-        }
-    }
-
-    private func homeDeckOpacity(for state: HomeDeckSectionState) -> Double {
-        switch state {
-        case .activeExpanded, .topCollapsed:
-            return 1
-        case .bottomCollapsed:
-            return 0.9
-        }
-    }
-
-    private func homeDeckZIndex(for state: HomeDeckSectionState) -> Double {
-        switch state {
-        case .activeExpanded:
-            return 3
-        case .topCollapsed:
-            return 2
-        case .bottomCollapsed:
-            return 1
-        }
-    }
-
     private func setActiveHomeSection(_ section: HomeSection) {
         guard section != activeHomeSection else { return }
         withAnimation(.spring(response: 0.72, dampingFraction: 0.88, blendDuration: 0.12)) {
             activeHomeSection = section
         }
-    }
-
-    private func homeDeckPosition(
-        for section: HomeSection,
-        topSections: [HomeSection],
-        bottomSections: [HomeSection],
-        topStackOrigin: CGFloat,
-        bottomStackTop: CGFloat,
-        tabHeight: CGFloat,
-        tabSpacing: CGFloat
-    ) -> (y: CGFloat, isBottomCollapsed: Bool) {
-        if let topIndex = topSections.firstIndex(of: section) {
-            return (topStackOrigin + CGFloat(topIndex) * (tabHeight + tabSpacing), false)
-        }
-
-        if let bottomIndex = bottomSections.firstIndex(of: section) {
-            return (bottomStackTop + CGFloat(bottomIndex) * (tabHeight + tabSpacing), true)
-        }
-
-        return (.zero, false)
     }
 
     private var homeSectionGesture: some Gesture {
@@ -691,20 +595,6 @@ struct ContentView: View {
                     setActiveHomeSection(previous)
                 }
             }
-    }
-
-    private func homeDeckSection(_ section: HomeSection, state: HomeDeckSectionState, topSafe: CGFloat) -> some View {
-        ZStack(alignment: .top) {
-            expandedHomeSection(section, topSafe: topSafe)
-                .opacity(state.isActive ? 1 : 0.001)
-                .allowsHitTesting(state.isActive)
-
-            homeSectionTab(for: section, isBottomCollapsed: state.isBottomCollapsed)
-                .opacity(state.isActive ? 0.001 : 1)
-                .allowsHitTesting(!state.isActive)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .clipped()
     }
 
     @ViewBuilder
