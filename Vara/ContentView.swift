@@ -418,6 +418,8 @@ struct ContentView: View {
     @State private var selectedSpot: TrailSpot? = nil
     @State private var activeHomeSection: HomeSection = .readiness
     @State private var homeTransitionPulse: Bool = false
+    @State private var isHomeSectionTransitioning: Bool = false
+    @State private var isHomeDragActive: Bool = false
     @State private var scrollOffset: CGFloat = 0
 
     // Floating menu state
@@ -500,6 +502,12 @@ struct ContentView: View {
                     homeTransitionPulse = false
                 }
             }
+            Task {
+                try? await Task.sleep(for: .milliseconds(650))
+                await MainActor.run {
+                    isHomeSectionTransitioning = false
+                }
+            }
         }
         .sensoryFeedback(.selection, trigger: selectedDayIndex)
         .sensoryFeedback(.selection, trigger: selectedActivity)
@@ -532,7 +540,7 @@ struct ContentView: View {
     /// fixed heights and the active section owns the remaining space.
     private var homePage: some View {
         GeometryReader { geo in
-            let topDeckPadding = geo.safeAreaInsets.top + 18
+            let topDeckPadding = max(8, geo.safeAreaInsets.top * 0.35)
             let tabHeight: CGFloat = 52
             let tabSpacing: CGFloat = homeTransitionPulse ? 12 : 8
             let sections = HomeSection.allCases
@@ -551,16 +559,16 @@ struct ContentView: View {
                         .opacity(1)
                 }
 
-                expandedHomeSection(activeHomeSection, topSafe: 0)
+                expandedHomeSection(activeHomeSection, topSafe: 0, availableHeight: activeHeight)
                     .frame(height: activeHeight, alignment: .top)
                     .scaleEffect(homeTransitionPulse ? 0.985 : 1, anchor: .top)
                     .shadow(
-                        color: .black.opacity(homeTransitionPulse ? 0.30 : 0.24),
-                        radius: homeTransitionPulse ? 22 : 18,
+                        color: .black.opacity(homeTransitionPulse ? 0.20 : 0.16),
+                        radius: homeTransitionPulse ? 18 : 14,
                         x: 0,
-                        y: homeTransitionPulse ? 12 : 10
+                        y: homeTransitionPulse ? 9 : 7
                     )
-                    .clipped()
+                    .allowsHitTesting(!isHomeSectionTransitioning && !isHomeDragActive)
 
                 ForEach(bottomSections) { section in
                     homeSectionTab(for: section, isBottomCollapsed: true)
@@ -571,7 +579,6 @@ struct ContentView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .padding(.top, topDeckPadding)
-            .clipped()
             .contentShape(Rectangle())
             .simultaneousGesture(homeSectionGesture)
             .animation(.spring(response: 0.72, dampingFraction: 0.88, blendDuration: 0.12), value: activeHomeSection)
@@ -581,6 +588,7 @@ struct ContentView: View {
 
     private func setActiveHomeSection(_ section: HomeSection) {
         guard section != activeHomeSection else { return }
+        isHomeSectionTransitioning = true
         withAnimation(.spring(response: 0.72, dampingFraction: 0.88, blendDuration: 0.12)) {
             activeHomeSection = section
         }
@@ -588,8 +596,22 @@ struct ContentView: View {
 
     private var homeSectionGesture: some Gesture {
         DragGesture(minimumDistance: 36, coordinateSpace: .local)
+            .onChanged { value in
+                if abs(value.translation.height) > 12 {
+                    isHomeDragActive = true
+                }
+            }
             .onEnded { value in
                 let vertical = value.translation.height
+                defer {
+                    Task {
+                        try? await Task.sleep(for: .milliseconds(120))
+                        await MainActor.run {
+                            isHomeDragActive = false
+                        }
+                    }
+                }
+
                 guard abs(vertical) > abs(value.translation.width) * 1.35, abs(vertical) > 70 else {
                     return
                 }
@@ -603,14 +625,18 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private func expandedHomeSection(_ section: HomeSection, topSafe: CGFloat) -> some View {
+    private func expandedHomeSection(_ section: HomeSection, topSafe: CGFloat, availableHeight: CGFloat) -> some View {
         switch section {
         case .readiness:
             activeHomeSheet(title: section.title, topSafe: topSafe) {
                 HeroZone(day: selectedDay, location: location, activity: selectedActivity,
                          conditionsTitle: conditionsTitle, conditionsSubtitle: conditionsSubtitle,
                          progress: 0, topInset: 0,
-                         onConditionsTap: { isShowingConditions = true })
+                         insightLimit: availableHeight < 520 ? 4 : 5,
+                         onConditionsTap: {
+                             guard !isHomeSectionTransitioning && !isHomeDragActive else { return }
+                             isShowingConditions = true
+                         })
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .clipped()
             }
@@ -635,26 +661,22 @@ struct ContentView: View {
         topSafe: CGFloat,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        VStack(spacing: homeTransitionPulse ? 14 : 8) {
+        VStack(spacing: homeTransitionPulse ? 10 : 6) {
             expandedSectionTitle(title, topSafe: topSafe)
             content()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background {
-            ZStack {
-                Rectangle().fill(.ultraThinMaterial)
-                Color.white.opacity(0.08)
-                Color.black.opacity(0.08)
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(.ultraThinMaterial)
         }
         .overlay(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(.white.opacity(0.22), lineWidth: 0.5)
+                .stroke(.white.opacity(0.18), lineWidth: 0.5)
         )
         .padding(.horizontal, 10)
-        .padding(.top, title == HomeSection.readiness.title ? 0 : 8)
-        .padding(.bottom, 8)
+        .padding(.top, title == HomeSection.readiness.title ? 0 : 6)
+        .padding(.bottom, 6)
         .clipped()
     }
 
@@ -666,7 +688,7 @@ struct ContentView: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 18)
-        .padding(.top, topSafe + 14)
+        .padding(.top, topSafe + 10)
         .padding(.bottom, 2)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -693,13 +715,9 @@ struct ContentView: View {
                 .fill(.ultraThinMaterial)
                 .overlay {
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(Color.black.opacity(isBottomCollapsed ? 0.08 : 0.12))
+                        .stroke(.white.opacity(0.18), lineWidth: 0.5)
                 }
-                .overlay {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(.white.opacity(0.22), lineWidth: 0.5)
-                }
-                .shadow(color: .black.opacity(isBottomCollapsed ? 0.08 : 0.14), radius: 8, x: 0, y: 4)
+                .shadow(color: .black.opacity(isBottomCollapsed ? 0.06 : 0.10), radius: 7, x: 0, y: 3)
         }
         .padding(.horizontal, 16)
     }
@@ -870,6 +888,7 @@ struct ContentView: View {
                 )
                 .contentShape(Rectangle())
                 .onTapGesture {
+                    guard !isHomeSectionTransitioning && !isHomeDragActive else { return }
                     withAnimation(.easeInOut(duration: 0.45)) {
                         selectedDayIndex = index
                     }
@@ -896,12 +915,13 @@ struct ContentView: View {
         ) {
             ForEach(MockData.nearbySpots) { spot in
                 TrailTile(spot: spot) {
+                    guard !isHomeSectionTransitioning && !isHomeDragActive else { return }
                     selectedSpot = spot
                 }
             }
         }
         .padding(.horizontal, 20)
-        .padding(.top, 4)
+        .padding(.top, 2)
     }
 
 }
@@ -1033,7 +1053,7 @@ struct DayRow: View {
             VerdictPill(verdict: day.verdict, emphasized: isSelected)
         }
         .padding(.horizontal, 24)
-        .padding(.vertical, 14)
+        .padding(.vertical, 10)
         .background(
             isSelected
                 ? Color.white.opacity(0.08)
@@ -1074,7 +1094,7 @@ struct TrailTile: View {
 
     var body: some View {
         Button(action: onTap) {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
                     Image(systemName: spot.kind.icon)
                         .font(.caption.weight(.semibold))
@@ -1101,8 +1121,8 @@ struct TrailTile: View {
 
                 VerdictPill(verdict: spot.verdict, emphasized: false)
             }
-            .padding(14)
-            .frame(maxWidth: .infinity, minHeight: 116, alignment: .topLeading)
+            .padding(10)
+            .frame(maxWidth: .infinity, minHeight: 94, alignment: .topLeading)
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .fill(.white.opacity(0.10))
@@ -1144,6 +1164,7 @@ struct HeroZone: View {
     let conditionsSubtitle: String
     let progress: CGFloat
     let topInset: CGFloat
+    let insightLimit: Int
     let onConditionsTap: () -> Void
 
     private var insightsTitle: String {
@@ -1174,7 +1195,7 @@ struct HeroZone: View {
     }
 
     var body: some View {
-        VStack(spacing: lerp(10, 8)) {
+        VStack(spacing: lerp(8, 6)) {
             decisionBlock
             if !isCondensed {
                 insightsBlock
@@ -1184,8 +1205,8 @@ struct HeroZone: View {
             }
         }
         .padding(.horizontal, 20)
-        .padding(.top, topInset + lerp(10, 6))
-        .padding(.bottom, 12)
+        .padding(.top, topInset + lerp(6, 4))
+        .padding(.bottom, 8)
         .frame(maxWidth: .infinity, alignment: .top)
         .background {
             // Frosted backdrop fades in alongside collapse so the compact bar
@@ -1209,7 +1230,7 @@ struct HeroZone: View {
     // MARK: Decision
 
     private var decisionBlock: some View {
-        VStack(spacing: lerp(10, 4)) {
+        VStack(spacing: lerp(8, 4)) {
             // Caption: location · activity (collapses height + opacity together).
             Text("\(location.uppercased())  ·  \(activity.rawValue.uppercased())")
                 .font(.caption.weight(.semibold))
@@ -1231,7 +1252,7 @@ struct HeroZone: View {
                     .opacity(fadeIn(from: 0.35))
 
                 Text(day.verdict.rawValue)
-                    .font(.system(size: lerp(64, 15), weight: .bold))
+                    .font(.system(size: lerp(56, 15), weight: .bold))
                     .tracking(day.verdict == .noGo ? -2 : 0)
                     .foregroundStyle(.white)
                     .contentTransition(.numericText())
@@ -1265,7 +1286,7 @@ struct HeroZone: View {
                 .padding(.horizontal, 16)
                 .fixedSize(horizontal: false, vertical: true)
                 .opacity(fadeOut(by: 0.45))
-                .frame(maxHeight: lerp(60, 0), alignment: .top)
+                .frame(maxHeight: lerp(48, 0), alignment: .top)
                 .clipped()
         }
     }
@@ -1273,19 +1294,19 @@ struct HeroZone: View {
     // MARK: Insights
 
     private var insightsBlock: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             Text(insightsTitle.uppercased())
                 .font(.caption.weight(.semibold))
                 .tracking(1.4)
                 .foregroundStyle(.white.opacity(0.78))
 
-            VStack(spacing: 6) {
-                ForEach(day.insights.prefix(5)) { insight in
+            VStack(spacing: 5) {
+                ForEach(day.insights.prefix(max(1, insightLimit))) { insight in
                     InsightRow(item: insight)
                 }
             }
         }
-        .padding(.top, 4)
+        .padding(.top, 2)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -1319,7 +1340,7 @@ struct HeroZone: View {
                     .foregroundStyle(.white.opacity(0.65))
             }
             .padding(.horizontal, isCondensed ? 0 : 4)
-            .padding(.vertical, lerp(14, 4))
+            .padding(.vertical, lerp(10, 4))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1352,7 +1373,7 @@ private struct InsightRow: View {
             Spacer()
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.vertical, 6)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
