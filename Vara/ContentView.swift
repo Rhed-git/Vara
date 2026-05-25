@@ -125,6 +125,23 @@ struct InsightItem: Identifiable {
     let icon: String
 }
 
+enum SpotKind {
+    case trail, park
+
+    var label: String { self == .trail ? "TRAIL" : "PARK" }
+    /// SF Symbols — tweak per device review.
+    var icon: String { self == .trail ? "mountain.2.fill" : "bicycle" }
+}
+
+struct TrailSpot: Identifiable {
+    let id = UUID()
+    let name: String
+    let kind: SpotKind
+    let detail: String          // e.g. "8.1 mi loop" or "3.2 mi away"
+    let verdict: Verdict
+    let insights: [InsightItem] // up to 5
+}
+
 struct DayForecast: Identifiable {
     let id = UUID()
     let date: Date
@@ -144,6 +161,52 @@ struct DayForecast: Identifiable {
 
 enum MockData {
     static let sevenDays: [DayForecast] = build()
+
+    /// Boulder-area trail and bike-park spots surfaced under the 7-day forecast.
+    /// Mixed verdicts so all three island variants are reachable from the home page.
+    static let nearbySpots: [TrailSpot] = [
+        TrailSpot(name: "Valmont Bike Park", kind: .park,  detail: "3.2 mi away",
+                  verdict: .go,      insights: spotInsights(for: .go)),
+        TrailSpot(name: "Marshall Mesa",     kind: .trail, detail: "8.1 mi loop",
+                  verdict: .go,      insights: spotInsights(for: .go)),
+        TrailSpot(name: "Betasso Preserve",  kind: .trail, detail: "6.5 mi loop",
+                  verdict: .caution, insights: spotInsights(for: .caution)),
+        TrailSpot(name: "Heil Valley Ranch", kind: .trail, detail: "7.8 mi out-and-back",
+                  verdict: .caution, insights: spotInsights(for: .caution)),
+        TrailSpot(name: "Hall Ranch",        kind: .trail, detail: "12 mi loop",
+                  verdict: .noGo,    insights: spotInsights(for: .noGo)),
+        TrailSpot(name: "White Ranch",       kind: .park,  detail: "18 mi network",
+                  verdict: .noGo,    insights: spotInsights(for: .noGo)),
+    ]
+
+    private static func spotInsights(for v: Verdict) -> [InsightItem] {
+        switch v {
+        case .go:
+            return [
+                InsightItem(title: "Hardpack is dry and fast", icon: "leaf.fill"),
+                InsightItem(title: "Carry 2L, the climb is exposed", icon: "drop.fill"),
+                InsightItem(title: "Berms and jumps holding well", icon: "flag.fill"),
+                InsightItem(title: "Light breeze on the descents", icon: "wind"),
+                InsightItem(title: "Daylight margin until 8:10 PM", icon: "sun.horizon.fill"),
+            ]
+        case .caution:
+            return [
+                InsightItem(title: "North-facing sections still tacky", icon: "leaf.fill"),
+                InsightItem(title: "One creek crossing running high", icon: "drop.fill"),
+                InsightItem(title: "Pack a shell for afternoon cells", icon: "cloud.rain.fill"),
+                InsightItem(title: "Loose over hardpack on descents", icon: "wind"),
+                InsightItem(title: "A shorter bail-out loop exists", icon: "map.fill"),
+            ]
+        case .noGo:
+            return [
+                InsightItem(title: "Trail likely closed, wet clay tears up tread", icon: "flag.fill"),
+                InsightItem(title: "Tune chain and brake pads", icon: "wrench.adjustable.fill"),
+                InsightItem(title: "Wash and inspect the drivetrain", icon: "sparkles"),
+                InsightItem(title: "Scout the next route on Trailforks", icon: "map.fill"),
+                InsightItem(title: "Mobility and stretch session", icon: "figure.cooldown"),
+            ]
+        }
+    }
 
     private static func build() -> [DayForecast] {
         let calendar = Calendar.current
@@ -330,7 +393,11 @@ enum MockData {
 struct ContentView: View {
     @State private var selectedDayIndex: Int = 0
     @State private var isShowingConditions: Bool = false
+    @State private var selectedSpot: TrailSpot? = nil
     @State private var scrollOffset: CGFloat = 0
+    /// Natural content height of the expanded hero — measured live via a hidden
+    /// probe so `expandedHeroHeight` actually hugs the content instead of guessing.
+    @State private var measuredHeroHeight: CGFloat = 580
 
     // Floating menu state
     @State private var location: String = "Boulder, CO"
@@ -386,16 +453,27 @@ struct ContentView: View {
                 .zIndex(10)
             }
         }
+        .overlay {
+            if let spot = selectedSpot {
+                TrailSpotIsland(spot: spot) {
+                    selectedSpot = nil
+                }
+                .zIndex(11)
+            }
+        }
         .onChange(of: currentPage) { _, _ in
-            // Leaving the home page dismisses the conditions island.
+            // Leaving the home page dismisses any open island.
             if isShowingConditions { isShowingConditions = false }
+            if selectedSpot != nil { selectedSpot = nil }
         }
         .sensoryFeedback(.selection, trigger: selectedDayIndex)
         .sensoryFeedback(.selection, trigger: selectedActivity)
         .sensoryFeedback(.selection, trigger: currentPage)
         .sensoryFeedback(.impact(weight: .light), trigger: isShowingConditions)
+        .sensoryFeedback(.impact(weight: .light), trigger: selectedSpot?.id)
         .animation(.easeInOut(duration: 0.32), value: currentPage)
         .animation(.spring(response: 0.4, dampingFraction: 0.82), value: isShowingConditions)
+        .animation(.spring(response: 0.4, dampingFraction: 0.82), value: selectedSpot?.id)
     }
 
     @ViewBuilder
@@ -414,59 +492,108 @@ struct ContentView: View {
         }
     }
 
-    /// Home page: a sticky hero zone (verdict + insights + conditions) pinned to the
-    /// top, with the 7-day forecast scrolling underneath. The hero starts filling the
-    /// majority of the screen and continuously collapses to a compact persistent bar
-    /// as the user scrolls down to reveal the forecast.
+    /// Home page architecture:
+    /// - The collapsing hero lives in the scroll view's `safeAreaInset(.top)` so the
+    ///   pinned section headers in the LazyVStack pin directly below the hero's
+    ///   current bottom — including while the hero is mid-collapse.
+    /// - The forecast and the nearby-spots grid are two `Section`s of a
+    ///   `LazyVStack(pinnedViews: [.sectionHeaders])`, so the section labels
+    ///   ("7-DAY FORECAST", "NEARBY TRAILS & PARKS") sticky-pin and hand off.
+    /// - An invisible measuring HeroZone (rendered alongside, opacity 0) publishes
+    ///   the natural content height so `expandedHeroHeight` hugs the actual layout.
     private var homePage: some View {
         GeometryReader { geo in
-            let expandedHeroHeight = min(720, max(500, geo.size.height * 0.84))
-            let collapsedHeroHeight: CGFloat = 156
-            let shrinkRange = expandedHeroHeight - collapsedHeroHeight
-            // Hero shrinks 1pt for every 1pt scrolled until it reaches its compact size.
+            let topSafe = geo.safeAreaInsets.top
+            // Clamp the measured natural height into a reasonable range so it's never
+            // shorter than ~360 (smallest readable verdict) nor taller than 92% of screen.
+            let expandedHeroHeight = min(geo.size.height * 0.92, max(360, measuredHeroHeight))
+            // Compact bar = top safe area (for the Dynamic Island / status) + 70 for
+            // the verdict line and conditions row.
+            let collapsedHeroHeight: CGFloat = topSafe + 70
+            let shrinkRange = max(1, expandedHeroHeight - collapsedHeroHeight)
+            // Hero shrinks 1pt per scroll-pt until it reaches its compact size.
             let currentHeroHeight = min(
                 expandedHeroHeight,
                 max(collapsedHeroHeight, expandedHeroHeight - scrollOffset)
             )
-            let progress: CGFloat = shrinkRange > 0
-                ? (expandedHeroHeight - currentHeroHeight) / shrinkRange
-                : 0
+            let progress: CGFloat = (expandedHeroHeight - currentHeroHeight) / shrinkRange
 
             ZStack(alignment: .top) {
-                // Forecast list scrolls underneath the sticky hero. The transparent
-                // spacer at the top matches the expanded hero height so the forecast
-                // begins right below the hero on first render.
-                ScrollView {
-                    VStack(spacing: 0) {
-                        GeometryReader { proxy in
-                            Color.clear.preference(
-                                key: ScrollOffsetKey.self,
-                                value: -proxy.frame(in: .named("scroll")).minY
-                            )
-                        }
-                        .frame(height: 0)
-
-                        Color.clear.frame(height: expandedHeroHeight)
-
-                        forecastSection
-                    }
-                }
-                .scrollIndicators(.hidden)
-                .coordinateSpace(name: "scroll")
-                .onPreferenceChange(ScrollOffsetKey.self) { scrollOffset = $0 }
-
+                // Invisible measuring probe — sized to its natural content height
+                // at progress 0, so we can drive `expandedHeroHeight` from real layout.
                 HeroZone(
                     day: selectedDay,
                     location: location,
                     activity: selectedActivity,
                     conditionsTitle: conditionsTitle,
                     conditionsSubtitle: conditionsSubtitle,
-                    progress: progress,
-                    onConditionsTap: { isShowingConditions = true }
+                    progress: 0,
+                    topInset: topSafe,
+                    onConditionsTap: {}
                 )
-                .frame(height: currentHeroHeight, alignment: .top)
+                .background(
+                    GeometryReader { proxy in
+                        Color.clear.preference(
+                            key: HeroContentHeightKey.self,
+                            value: proxy.size.height
+                        )
+                    }
+                )
                 .frame(maxWidth: .infinity)
-                .clipped()
+                .opacity(0)
+                .allowsHitTesting(false)
+
+                ScrollView {
+                    // Scroll offset probe.
+                    GeometryReader { proxy in
+                        Color.clear.preference(
+                            key: ScrollOffsetKey.self,
+                            value: -proxy.frame(in: .named("scroll")).minY
+                        )
+                    }
+                    .frame(height: 0)
+
+                    LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                        Section {
+                            forecastRows
+                        } header: {
+                            pinnedSectionHeader(title: "7-DAY FORECAST")
+                        }
+
+                        Section {
+                            nearbyTilesGrid
+                        } header: {
+                            pinnedSectionHeader(title: "NEARBY TRAILS & PARKS")
+                        }
+
+                        // Breathing room above the floating menu pill.
+                        Color.clear.frame(height: 120)
+                    }
+                }
+                .scrollIndicators(.hidden)
+                .coordinateSpace(name: "scroll")
+                .onPreferenceChange(ScrollOffsetKey.self) { scrollOffset = $0 }
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    HeroZone(
+                        day: selectedDay,
+                        location: location,
+                        activity: selectedActivity,
+                        conditionsTitle: conditionsTitle,
+                        conditionsSubtitle: conditionsSubtitle,
+                        progress: progress,
+                        topInset: topSafe,
+                        onConditionsTap: { isShowingConditions = true }
+                    )
+                    .frame(height: currentHeroHeight, alignment: .top)
+                    .frame(maxWidth: .infinity)
+                    .clipped()
+                }
+            }
+            .onPreferenceChange(HeroContentHeightKey.self) { newValue in
+                // Avoid feedback loops from sub-pixel jitter.
+                if newValue > 0, abs(newValue - measuredHeroHeight) > 1 {
+                    measuredHeroHeight = newValue
+                }
             }
         }
     }
@@ -625,16 +752,10 @@ struct ContentView: View {
 
     // MARK: 7-day forecast
 
-    private var forecastSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("7-DAY FORECAST")
-                .font(.caption.weight(.semibold))
-                .tracking(1.5)
-                .foregroundStyle(.white.opacity(0.78))
-                .padding(.horizontal, 24)
-                .padding(.top, 32)
-                .padding(.bottom, 12)
+    // MARK: 7-day forecast rows (header lives in LazyVStack as a pinned section header)
 
+    private var forecastRows: some View {
+        VStack(spacing: 0) {
             ForEach(Array(forecast.enumerated()), id: \.element.id) { index, day in
                 DayRow(
                     day: day,
@@ -655,7 +776,46 @@ struct ContentView: View {
                 }
             }
         }
-        .padding(.bottom, 120)  // breathing room above the floating menu pill
+    }
+
+    // MARK: Nearby trails grid (header lives in LazyVStack as a pinned section header)
+
+    private var nearbyTilesGrid: some View {
+        LazyVGrid(
+            columns: [
+                GridItem(.flexible(), spacing: 12),
+                GridItem(.flexible(), spacing: 12),
+            ],
+            spacing: 12
+        ) {
+            ForEach(MockData.nearbySpots) { spot in
+                TrailTile(spot: spot) {
+                    selectedSpot = spot
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 4)
+    }
+
+    /// Pinned section header rendered behind a translucent frosted bar so rows
+    /// don't bleed through while it's pinned at the top of the scroll view's
+    /// safe area (which itself sits just below the collapsing hero).
+    private func pinnedSectionHeader(title: String) -> some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .tracking(1.5)
+            .foregroundStyle(.white.opacity(0.88))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 24)
+            .padding(.top, 18)
+            .padding(.bottom, 10)
+            .background {
+                ZStack {
+                    Rectangle().fill(.ultraThinMaterial)
+                    Color.black.opacity(0.18)
+                }
+            }
     }
 }
 
@@ -720,6 +880,68 @@ struct VerdictPill: View {
     }
 }
 
+// MARK: - Trail Tile
+
+/// One tile in the "Nearby Trails & Parks" grid below the 7-day forecast.
+/// Kind label + icon at the top, name, detail, and a verdict pill at the bottom.
+struct TrailTile: View {
+    let spot: TrailSpot
+    let onTap: () -> Void
+
+    @State private var isPressed: Bool = false
+
+    var body: some View {
+        Button(action: onTap) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: spot.kind.icon)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.75))
+                    Text(spot.kind.label)
+                        .font(.caption2.weight(.semibold))
+                        .tracking(1.0)
+                        .foregroundStyle(.white.opacity(0.75))
+                    Spacer(minLength: 0)
+                }
+
+                Text(spot.name)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+
+                Text(spot.detail)
+                    .font(.footnote)
+                    .foregroundStyle(.white.opacity(0.72))
+                    .lineLimit(1)
+
+                Spacer(minLength: 0)
+
+                VerdictPill(verdict: spot.verdict, emphasized: false)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, minHeight: 116, alignment: .topLeading)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(.white.opacity(0.10))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(.white.opacity(0.16), lineWidth: 0.5)
+            )
+            .scaleEffect(isPressed ? 0.97 : 1.0)
+            .animation(.easeInOut(duration: 0.12), value: isPressed)
+        }
+        .buttonStyle(.plain)
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in isPressed = true }
+                .onEnded { _ in isPressed = false }
+        )
+        .accessibilityLabel("\(spot.name), \(spot.kind.label.lowercased()), \(spot.detail), \(spot.verdict.rawValue)")
+    }
+}
+
 // MARK: - Hero Zone
 //
 // The sticky three-section header on the home page: verdict → insights (what to
@@ -739,6 +961,7 @@ struct HeroZone: View {
     let conditionsTitle: String
     let conditionsSubtitle: String
     let progress: CGFloat
+    let topInset: CGFloat
     let onConditionsTap: () -> Void
 
     private var insightsTitle: String {
@@ -771,14 +994,17 @@ struct HeroZone: View {
     var body: some View {
         VStack(spacing: lerp(10, 8)) {
             decisionBlock
-            insightsBlock
-            Spacer(minLength: 0)
+            if !isCondensed {
+                insightsBlock
+                    .opacity(fadeOut(by: 0.5))
+                    .transition(.opacity)
+            }
             conditionsBlock
         }
         .padding(.horizontal, 20)
-        .padding(.top, lerp(48, 14))
+        .padding(.top, topInset + lerp(10, 6))
         .padding(.bottom, 12)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .frame(maxWidth: .infinity, alignment: .top)
         .background {
             // Frosted backdrop fades in alongside collapse so the compact bar
             // reads clearly against the forecast scrolling underneath.
@@ -870,32 +1096,14 @@ struct HeroZone: View {
                 .font(.caption.weight(.semibold))
                 .tracking(1.4)
                 .foregroundStyle(.white.opacity(0.78))
-                .opacity(fadeOut(by: 0.45))
-                .frame(height: lerp(18, 0), alignment: .top)
-                .clipped()
 
-            if isCondensed {
-                // Compact: a row of just the insight icons — still 5 items, just smaller.
-                HStack(spacing: 16) {
-                    ForEach(day.insights.prefix(5)) { insight in
-                        Image(systemName: insight.icon)
-                            .font(.footnote)
-                            .foregroundStyle(.white.opacity(0.85))
-                            .frame(width: 18, height: 18)
-                    }
-                    Spacer(minLength: 0)
+            VStack(spacing: 6) {
+                ForEach(day.insights.prefix(5)) { insight in
+                    InsightRow(item: insight)
                 }
-                .transition(.opacity)
-            } else {
-                VStack(spacing: 6) {
-                    ForEach(day.insights.prefix(5)) { insight in
-                        InsightRow(item: insight)
-                    }
-                }
-                .transition(.opacity)
             }
         }
-        .padding(.top, lerp(4, 0))
+        .padding(.top, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -1099,6 +1307,138 @@ struct ConditionsIsland: View {
     }
 }
 
+// MARK: - Trail Spot Island
+//
+// Same frosted shell as ConditionsIsland, but the body is the spot's verdict
+// summary plus the list of insights (What to Expect for go/caution, Down Time
+// Prep for no-go). Capped at five insight rows.
+
+struct TrailSpotIsland: View {
+    let spot: TrailSpot
+    let onDismiss: () -> Void
+
+    private var insightsLabel: String {
+        switch spot.verdict {
+        case .go, .caution: return "What to Expect"
+        case .noGo:         return "Down Time Prep"
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.42)
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture { onDismiss() }
+                .transition(.opacity)
+
+            island
+                .transition(.scale(scale: 0.92).combined(with: .opacity))
+        }
+    }
+
+    private var island: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            verdictBlock
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text(insightsLabel.uppercased())
+                        .font(.caption.weight(.semibold))
+                        .tracking(1.4)
+                        .foregroundStyle(.white.opacity(0.82))
+
+                    VStack(spacing: 8) {
+                        ForEach(spot.insights.prefix(5)) { insight in
+                            InsightRow(item: insight)
+                        }
+                    }
+                }
+                .padding(.horizontal, 22)
+                .padding(.top, 4)
+                .padding(.bottom, 22)
+            }
+            .scrollIndicators(.hidden)
+        }
+        .frame(maxWidth: 420)
+        .background(islandBackground)
+        .overlay(
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .stroke(.white.opacity(0.28), lineWidth: 0.5)
+        )
+        .shadow(color: .black.opacity(0.55), radius: 30, x: 0, y: 18)
+        .padding(.horizontal, 22)
+        // Same top/bottom padding as ConditionsIsland so it never covers the pill.
+        .padding(.top, 60)
+        .padding(.bottom, 120)
+    }
+
+    private var islandBackground: some View {
+        ZStack {
+            Rectangle().fill(.thickMaterial)
+            Color.black.opacity(0.55)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+    }
+
+    private var header: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Image(systemName: spot.kind.icon)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.85))
+                    Text(spot.kind.label)
+                        .font(.caption2.weight(.semibold))
+                        .tracking(1.4)
+                        .foregroundStyle(.white.opacity(0.85))
+                }
+                Text(spot.name)
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                Text(spot.detail)
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.88))
+            }
+            Spacer()
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .font(.footnote.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 30, height: 30)
+                    .background(.white.opacity(0.20), in: Circle())
+                    .overlay(Circle().stroke(.white.opacity(0.30), lineWidth: 0.5))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Close")
+        }
+        .padding(.horizontal, 22)
+        .padding(.top, 20)
+        .padding(.bottom, 14)
+    }
+
+    private var verdictBlock: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text(spot.verdict.rawValue)
+                    .font(.system(size: 32, weight: .bold))
+                    .foregroundStyle(.white)
+                Text(spot.verdict.headline)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+            }
+            Text(spot.verdict.summary)
+                .font(.subheadline)
+                .foregroundStyle(.white.opacity(0.92))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 22)
+        .padding(.bottom, 14)
+    }
+}
+
 struct FactorSection: View {
     let type: FactorType
     let detail: FactorDetail
@@ -1164,6 +1504,15 @@ struct ScrollOffsetKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()
+    }
+}
+
+/// Published by the invisible expanded-hero probe so the home page can size
+/// `expandedHeroHeight` to the natural content height.
+struct HeroContentHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 
