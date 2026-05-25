@@ -492,105 +492,79 @@ struct ContentView: View {
         }
     }
 
-    /// Home page architecture:
-    /// - The collapsing hero lives in the scroll view's `safeAreaInset(.top)` so the
-    ///   pinned section headers in the LazyVStack pin directly below the hero's
-    ///   current bottom — including while the hero is mid-collapse.
-    /// - The forecast and the nearby-spots grid are two `Section`s of a
-    ///   `LazyVStack(pinnedViews: [.sectionHeaders])`, so the section labels
-    ///   ("7-DAY FORECAST", "NEARBY TRAILS & PARKS") sticky-pin and hand off.
-    /// - An invisible measuring HeroZone (rendered alongside, opacity 0) publishes
-    ///   the natural content height so `expandedHeroHeight` hugs the actual layout.
+    /// Home page architecture (Session 004 fix):
+    /// - `safeAreaInset(.top)` reserves a FIXED-height strip (`pinInset`) where the
+    ///   LazyVStack's pinned section headers pin. It's never tied to `scrollOffset`,
+    ///   so there's no feedback loop between the scroll offset and the inset height.
+    /// - A transparent spacer of `shrinkRange` sits above the LazyVStack so the
+    ///   first section begins at the expanded hero's bottom edge on first render.
+    /// - The collapsing hero is a plain overlay in the ZStack on top of the
+    ///   scroll view (the layout that collapsed correctly pre-restructure).
     private var homePage: some View {
         GeometryReader { geo in
             let topSafe = geo.safeAreaInsets.top
-            // Clamp the measured natural height into a reasonable range so it's never
-            // shorter than ~360 (smallest readable verdict) nor taller than 92% of screen.
             let expandedHeroHeight = min(geo.size.height * 0.92, max(360, measuredHeroHeight))
-            // Compact bar = top safe area (for the Dynamic Island / status) + 70 for
-            // the verdict line and conditions row.
             let collapsedHeroHeight: CGFloat = topSafe + 70
             let shrinkRange = max(1, expandedHeroHeight - collapsedHeroHeight)
-            // Hero shrinks 1pt per scroll-pt until it reaches its compact size.
             let currentHeroHeight = min(
                 expandedHeroHeight,
                 max(collapsedHeroHeight, expandedHeroHeight - scrollOffset)
             )
             let progress: CGFloat = (expandedHeroHeight - currentHeroHeight) / shrinkRange
+            // Fixed strip that marks where the pinned headers pin (just under the
+            // collapsed hero). Never scroll-dependent.
+            let pinInset = max(0, collapsedHeroHeight - topSafe)
 
             ZStack(alignment: .top) {
-                // Invisible measuring probe — sized to its natural content height
-                // at progress 0, so we can drive `expandedHeroHeight` from real layout.
-                HeroZone(
-                    day: selectedDay,
-                    location: location,
-                    activity: selectedActivity,
-                    conditionsTitle: conditionsTitle,
-                    conditionsSubtitle: conditionsSubtitle,
-                    progress: 0,
-                    topInset: topSafe,
-                    onConditionsTap: {}
-                )
-                .background(
-                    GeometryReader { proxy in
-                        Color.clear.preference(
-                            key: HeroContentHeightKey.self,
-                            value: proxy.size.height
-                        )
-                    }
-                )
-                .frame(maxWidth: .infinity)
-                .opacity(0)
-                .allowsHitTesting(false)
+                // Invisible probe to measure the hero's natural content height.
+                HeroZone(day: selectedDay, location: location, activity: selectedActivity,
+                         conditionsTitle: conditionsTitle, conditionsSubtitle: conditionsSubtitle,
+                         progress: 0, topInset: topSafe, onConditionsTap: {})
+                    .background(GeometryReader { p in
+                        Color.clear.preference(key: HeroContentHeightKey.self, value: p.size.height)
+                    })
+                    .frame(maxWidth: .infinity)
+                    .opacity(0)
+                    .allowsHitTesting(false)
 
                 ScrollView {
-                    // Scroll offset probe.
-                    GeometryReader { proxy in
-                        Color.clear.preference(
-                            key: ScrollOffsetKey.self,
-                            value: -proxy.frame(in: .named("scroll")).minY
-                        )
-                    }
-                    .frame(height: 0)
+                    VStack(spacing: 0) {
+                        // Spacer covering the expanded hero above the pinned line, so the
+                        // first section begins at the expanded hero's bottom edge.
+                        Color.clear.frame(height: shrinkRange)
 
-                    LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
-                        Section {
-                            forecastRows
-                        } header: {
-                            pinnedSectionHeader(title: "7-DAY FORECAST")
+                        LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                            Section { forecastRows } header: {
+                                pinnedSectionHeader(title: "7-DAY FORECAST")
+                            }
+                            Section { nearbyTilesGrid } header: {
+                                pinnedSectionHeader(title: "NEARBY TRAILS & PARKS")
+                            }
+                            Color.clear.frame(height: 120)
                         }
-
-                        Section {
-                            nearbyTilesGrid
-                        } header: {
-                            pinnedSectionHeader(title: "NEARBY TRAILS & PARKS")
-                        }
-
-                        // Breathing room above the floating menu pill.
-                        Color.clear.frame(height: 120)
                     }
                 }
                 .scrollIndicators(.hidden)
-                .coordinateSpace(name: "scroll")
-                .onPreferenceChange(ScrollOffsetKey.self) { scrollOffset = $0 }
+                .onScrollGeometryChange(for: CGFloat.self) { geo in
+                    geo.contentOffset.y + geo.contentInsets.top
+                } action: { _, newValue in
+                    scrollOffset = max(0, newValue)
+                }
+                // FIXED inset: stable pin line, no feedback with scrollOffset.
                 .safeAreaInset(edge: .top, spacing: 0) {
-                    HeroZone(
-                        day: selectedDay,
-                        location: location,
-                        activity: selectedActivity,
-                        conditionsTitle: conditionsTitle,
-                        conditionsSubtitle: conditionsSubtitle,
-                        progress: progress,
-                        topInset: topSafe,
-                        onConditionsTap: { isShowingConditions = true }
-                    )
+                    Color.clear.frame(height: pinInset)
+                }
+
+                // Collapsing hero as a plain overlay on top.
+                HeroZone(day: selectedDay, location: location, activity: selectedActivity,
+                         conditionsTitle: conditionsTitle, conditionsSubtitle: conditionsSubtitle,
+                         progress: progress, topInset: topSafe,
+                         onConditionsTap: { isShowingConditions = true })
                     .frame(height: currentHeroHeight, alignment: .top)
                     .frame(maxWidth: .infinity)
                     .clipped()
-                }
             }
             .onPreferenceChange(HeroContentHeightKey.self) { newValue in
-                // Avoid feedback loops from sub-pixel jitter.
                 if newValue > 0, abs(newValue - measuredHeroHeight) > 1 {
                     measuredHeroHeight = newValue
                 }
