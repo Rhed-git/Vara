@@ -500,6 +500,7 @@ struct ContentView: View {
         .sensoryFeedback(.selection, trigger: selectedDayIndex)
         .sensoryFeedback(.selection, trigger: selectedActivity)
         .sensoryFeedback(.selection, trigger: currentPage)
+        .sensoryFeedback(.selection, trigger: activeHomeSection)
         .sensoryFeedback(.impact(weight: .light), trigger: isShowingConditions)
         .sensoryFeedback(.impact(weight: .light), trigger: selectedSpot?.id)
         .animation(.easeInOut(duration: 0.32), value: currentPage)
@@ -529,9 +530,9 @@ struct ContentView: View {
         GeometryReader { geo in
             let topSafe = geo.safeAreaInsets.top
 
-            VStack(spacing: homeTransitionPulse ? 12 : 0) {
+            VStack(spacing: homeTransitionPulse ? 14 : 8) {
                 ForEach(HomeSection.allCases.filter { $0.rawValue < activeHomeSection.rawValue }) { section in
-                    collapsedHomeHeader(for: section, topSafe: section == .readiness ? topSafe : 0)
+                    homeSectionTab(for: section, topSafe: section == .readiness ? topSafe : 0, isPreview: false)
                         .zIndex(1)
                 }
 
@@ -539,29 +540,30 @@ struct ContentView: View {
                     .frame(maxHeight: .infinity)
                     .id(activeHomeSection)
                     .transition(.asymmetric(
-                        insertion: .move(edge: .bottom).combined(with: .opacity),
-                        removal: .move(edge: .top).combined(with: .opacity)
+                        insertion: .move(edge: .bottom).combined(with: .opacity).combined(with: .scale(scale: 0.96, anchor: .bottom)),
+                        removal: .move(edge: .top).combined(with: .opacity).combined(with: .scale(scale: 0.96, anchor: .top))
                     ))
-                    .scaleEffect(homeTransitionPulse ? 0.985 : 1, anchor: .top)
+                    .scaleEffect(homeTransitionPulse ? 0.975 : 1, anchor: .top)
                     .zIndex(2)
 
                 ForEach(HomeSection.allCases.filter { $0.rawValue > activeHomeSection.rawValue }) { section in
-                    collapsedHomeHeader(for: section, topSafe: 0)
+                    homeSectionTab(for: section, topSafe: 0, isPreview: true)
                         .zIndex(0)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .padding(.bottom, 92)
             .clipped()
             .contentShape(Rectangle())
             .simultaneousGesture(homeSectionGesture)
-            .animation(.spring(response: 0.58, dampingFraction: 0.82, blendDuration: 0.08), value: activeHomeSection)
-            .animation(.spring(response: 0.42, dampingFraction: 0.84), value: homeTransitionPulse)
+            .animation(.spring(response: 0.65, dampingFraction: 0.86, blendDuration: 0.08), value: activeHomeSection)
+            .animation(.spring(response: 0.48, dampingFraction: 0.86), value: homeTransitionPulse)
         }
     }
 
     private func setActiveHomeSection(_ section: HomeSection) {
         guard section != activeHomeSection else { return }
-        withAnimation(.spring(response: 0.58, dampingFraction: 0.82, blendDuration: 0.08)) {
+        withAnimation(.spring(response: 0.65, dampingFraction: 0.86, blendDuration: 0.08)) {
             activeHomeSection = section
         }
     }
@@ -587,32 +589,25 @@ struct ContentView: View {
         switch activeHomeSection {
         case .readiness:
             activeHomeSheet(title: activeHomeSection.title, topSafe: topSafe) {
-                ScrollView {
-                    HeroZone(day: selectedDay, location: location, activity: selectedActivity,
-                             conditionsTitle: conditionsTitle, conditionsSubtitle: conditionsSubtitle,
-                             progress: 0, topInset: 0,
-                             onConditionsTap: { isShowingConditions = true })
-                        .frame(maxWidth: .infinity)
-                    Color.clear.frame(height: 110)
-                }
-                .scrollIndicators(.hidden)
+                HeroZone(day: selectedDay, location: location, activity: selectedActivity,
+                         conditionsTitle: conditionsTitle, conditionsSubtitle: conditionsSubtitle,
+                         progress: 0, topInset: 0,
+                         onConditionsTap: { isShowingConditions = true })
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .clipped()
             }
         case .forecast:
             activeHomeSheet(title: activeHomeSection.title, topSafe: topSafe) {
-                ScrollView {
-                    forecastRows
-                    Color.clear.frame(height: 110)
-                }
-                .scrollIndicators(.hidden)
+                forecastRows
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .clipped()
             }
         case .nearby:
             activeHomeSheet(title: activeHomeSection.title, topSafe: topSafe) {
-                ScrollView {
-                    nearbyTilesGrid
-                        .padding(.top, 8)
-                    Color.clear.frame(height: 110)
-                }
-                .scrollIndicators(.hidden)
+                nearbyTilesGrid
+                    .padding(.top, 8)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .clipped()
             }
         }
     }
@@ -643,6 +638,7 @@ struct ContentView: View {
         .padding(.horizontal, 10)
         .padding(.top, activeHomeSection == .readiness ? 0 : 8)
         .padding(.bottom, 8)
+        .clipped()
     }
 
     private func expandedSectionTitle(_ title: String, topSafe: CGFloat) -> some View {
@@ -659,7 +655,7 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private func collapsedHomeHeader(for section: HomeSection, topSafe: CGFloat) -> some View {
+    private func homeSectionTab(for section: HomeSection, topSafe: CGFloat, isPreview: Bool) -> some View {
         Button {
             setActiveHomeSection(section)
         } label: {
@@ -673,20 +669,25 @@ struct ContentView: View {
             }
         }
         .buttonStyle(.plain)
-        .padding(.top, topSafe)
-        .frame(height: topSafe + 62)
+        .frame(height: 38)
+        .opacity(isPreview ? 0.76 : 1)
+        .scaleEffect(isPreview ? 0.97 : 1)
         .background {
-            ZStack {
-                Rectangle().fill(.ultraThinMaterial)
-                Color.black.opacity(0.16)
-            }
-            .ignoresSafeArea(edges: topSafe > 0 ? .top : [])
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(Color.black.opacity(isPreview ? 0.08 : 0.12))
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(.white.opacity(0.22), lineWidth: 0.5)
+                }
+                .shadow(color: .black.opacity(isPreview ? 0.08 : 0.14), radius: 8, x: 0, y: 4)
         }
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(.white.opacity(0.20))
-                .frame(height: 0.5)
-        }
+        .padding(.horizontal, 16)
+        .padding(.top, topSafe > 0 ? topSafe + 6 : 0)
+        .frame(height: topSafe > 0 ? topSafe + 44 : 38, alignment: .bottom)
     }
 
     private var backgroundGradient: LinearGradient {
