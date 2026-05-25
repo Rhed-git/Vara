@@ -455,18 +455,20 @@ struct ContentView: View {
             .animation(.easeInOut(duration: 0.55), value: currentCondition)
             .animation(.easeInOut(duration: 0.35), value: currentPage)
 
-            // Page content — switches based on the bottom pill selection.
-            currentPageView
-                .transition(.opacity)
-        }
-        .safeAreaInset(edge: .bottom) {
-            BottomMenuPill(
-                selectedActivity: selectedActivity,
-                selectedItem: $currentPage
-            )
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-            .padding(.bottom, 10)
+            VStack(spacing: 16) {
+                // Page content — switches based on the bottom pill selection.
+                currentPageView
+                    .frame(maxHeight: .infinity)
+                    .transition(.opacity)
+
+                BottomMenuPill(
+                    selectedActivity: selectedActivity,
+                    selectedItem: $currentPage
+                )
+                .frame(height: 56)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 10)
+            }
         }
         .overlay {
             if isShowingConditions {
@@ -531,12 +533,15 @@ struct ContentView: View {
     private var homePage: some View {
         GeometryReader { geo in
             let topDeckPadding = geo.safeAreaInsets.top + 18
-            let bottomDeckPadding = geo.safeAreaInsets.bottom + 140
             let tabHeight: CGFloat = 52
             let tabSpacing: CGFloat = homeTransitionPulse ? 12 : 8
             let sections = HomeSection.allCases
             let topSections = sections.filter { $0.rawValue < activeHomeSection.rawValue }
             let bottomSections = sections.filter { $0.rawValue > activeHomeSection.rawValue }
+            let collapsedCount = topSections.count + bottomSections.count
+            let collapsedHeight = CGFloat(collapsedCount) * tabHeight
+            let sectionSpacing = CGFloat(collapsedCount) * tabSpacing
+            let activeHeight = max(0, geo.size.height - topDeckPadding - collapsedHeight - sectionSpacing)
 
             VStack(spacing: tabSpacing) {
                 ForEach(topSections) { section in
@@ -547,7 +552,7 @@ struct ContentView: View {
                 }
 
                 expandedHomeSection(activeHomeSection, topSafe: 0)
-                    .frame(maxHeight: .infinity, alignment: .top)
+                    .frame(height: activeHeight, alignment: .top)
                     .scaleEffect(homeTransitionPulse ? 0.985 : 1, anchor: .top)
                     .shadow(
                         color: .black.opacity(homeTransitionPulse ? 0.30 : 0.24),
@@ -566,7 +571,6 @@ struct ContentView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .padding(.top, topDeckPadding)
-            .padding(.bottom, bottomDeckPadding)
             .clipped()
             .contentShape(Rectangle())
             .simultaneousGesture(homeSectionGesture)
