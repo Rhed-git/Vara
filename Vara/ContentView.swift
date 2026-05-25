@@ -75,6 +75,22 @@ enum HomeSection: Int, CaseIterable, Identifiable {
     }
 }
 
+private enum HomeDeckSectionState {
+    case topCollapsed
+    case activeExpanded
+    case bottomPreview
+
+    var isActive: Bool {
+        if case .activeExpanded = self { return true }
+        return false
+    }
+
+    var isPreview: Bool {
+        if case .bottomPreview = self { return true }
+        return false
+    }
+}
+
 enum Verdict: String {
     case go = "GO"
     case caution = "CAUTION"
@@ -419,6 +435,7 @@ struct ContentView: View {
     @State private var activeHomeSection: HomeSection = .readiness
     @State private var homeTransitionPulse: Bool = false
     @State private var scrollOffset: CGFloat = 0
+    @Namespace private var homeDeckNamespace
 
     // Floating menu state
     @State private var location: String = "Boulder, CO"
@@ -491,7 +508,7 @@ struct ContentView: View {
             scrollOffset = CGFloat(newValue.rawValue) * 320
             homeTransitionPulse = true
             Task {
-                try? await Task.sleep(for: .milliseconds(420))
+                try? await Task.sleep(for: .milliseconds(520))
                 await MainActor.run {
                     homeTransitionPulse = false
                 }
@@ -529,43 +546,132 @@ struct ContentView: View {
     private var homePage: some View {
         GeometryReader { geo in
             let topSafe = geo.safeAreaInsets.top
+            let bottomMenuClearance = geo.safeAreaInsets.bottom + 96
+            let menuBreathingRoom: CGFloat = 16
+            let tabHeight: CGFloat = 38
+            let tabSpacing: CGFloat = homeTransitionPulse ? 12 : 8
+            let sections = HomeSection.allCases
+            let topSections = sections.filter { $0.rawValue < activeHomeSection.rawValue }
+            let bottomSections = sections.filter { $0.rawValue > activeHomeSection.rawValue }
+            let topStackOrigin = topSafe + 8
+            let topStackHeight = topSections.isEmpty
+                ? CGFloat.zero
+                : CGFloat(topSections.count) * tabHeight + CGFloat(topSections.count - 1) * tabSpacing
+            let bottomStackHeight = bottomSections.isEmpty
+                ? CGFloat.zero
+                : CGFloat(bottomSections.count) * tabHeight + CGFloat(bottomSections.count - 1) * tabSpacing
+            let bottomStackTop = geo.size.height - bottomMenuClearance - menuBreathingRoom - bottomStackHeight
+            let activeTop = topSections.isEmpty ? CGFloat.zero : topStackOrigin + topStackHeight + (homeTransitionPulse ? 18 : 12)
+            let activeBottom = bottomSections.isEmpty
+                ? geo.size.height - bottomMenuClearance - menuBreathingRoom
+                : bottomStackTop - (homeTransitionPulse ? 18 : 12)
+            let activeHeight = max(180, activeBottom - activeTop)
 
-            VStack(spacing: homeTransitionPulse ? 14 : 8) {
-                ForEach(HomeSection.allCases.filter { $0.rawValue < activeHomeSection.rawValue }) { section in
-                    homeSectionTab(for: section, topSafe: section == .readiness ? topSafe : 0, isPreview: false)
-                        .zIndex(1)
-                }
+            ZStack(alignment: .top) {
+                ForEach(sections) { section in
+                    let position = homeDeckPosition(
+                        for: section,
+                        topSections: topSections,
+                        bottomSections: bottomSections,
+                        topStackOrigin: topStackOrigin,
+                        bottomStackTop: bottomStackTop,
+                        tabHeight: tabHeight,
+                        tabSpacing: tabSpacing
+                    )
+                    let state = homeDeckState(for: section)
 
-                expandedHomeSection(topSafe: activeHomeSection == .readiness ? topSafe : 0)
-                    .frame(maxHeight: .infinity)
-                    .id(activeHomeSection)
-                    .transition(.asymmetric(
-                        insertion: .move(edge: .bottom).combined(with: .opacity).combined(with: .scale(scale: 0.96, anchor: .bottom)),
-                        removal: .move(edge: .top).combined(with: .opacity).combined(with: .scale(scale: 0.96, anchor: .top))
-                    ))
-                    .scaleEffect(homeTransitionPulse ? 0.975 : 1, anchor: .top)
-                    .zIndex(2)
-
-                ForEach(HomeSection.allCases.filter { $0.rawValue > activeHomeSection.rawValue }) { section in
-                    homeSectionTab(for: section, topSafe: 0, isPreview: true)
-                        .zIndex(0)
+                    homeDeckSection(
+                        section,
+                        state: state,
+                        topSafe: section == .readiness && state.isActive ? topSafe : 0
+                    )
+                    .matchedGeometryEffect(id: "home-shell-\(section.id)", in: homeDeckNamespace)
+                    .frame(height: state.isActive ? activeHeight : tabHeight, alignment: .top)
+                    .offset(y: state.isActive ? activeTop : position.y)
+                    .scaleEffect(homeDeckScale(for: state), anchor: state.isPreview ? .bottom : .top)
+                    .opacity(homeDeckOpacity(for: state))
+                    .shadow(
+                        color: .black.opacity(state.isActive ? (homeTransitionPulse ? 0.30 : 0.24) : (state.isPreview ? 0.08 : 0.14)),
+                        radius: state.isActive ? (homeTransitionPulse ? 22 : 18) : 8,
+                        x: 0,
+                        y: state.isActive ? (homeTransitionPulse ? 12 : 10) : 4
+                    )
+                    .zIndex(homeDeckZIndex(for: state))
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .padding(.bottom, 92)
             .clipped()
             .contentShape(Rectangle())
             .simultaneousGesture(homeSectionGesture)
-            .animation(.spring(response: 0.65, dampingFraction: 0.86, blendDuration: 0.08), value: activeHomeSection)
-            .animation(.spring(response: 0.48, dampingFraction: 0.86), value: homeTransitionPulse)
+            .animation(.spring(response: 0.72, dampingFraction: 0.88, blendDuration: 0.12), value: activeHomeSection)
+            .animation(.spring(response: 0.52, dampingFraction: 0.88), value: homeTransitionPulse)
+        }
+    }
+
+    private func homeDeckState(for section: HomeSection) -> HomeDeckSectionState {
+        if section == activeHomeSection {
+            return .activeExpanded
+        }
+
+        return section.rawValue < activeHomeSection.rawValue ? .topCollapsed : .bottomPreview
+    }
+
+    private func homeDeckScale(for state: HomeDeckSectionState) -> CGFloat {
+        switch state {
+        case .activeExpanded:
+            return homeTransitionPulse ? 0.985 : 1
+        case .topCollapsed:
+            return 0.995
+        case .bottomPreview:
+            return 0.97
+        }
+    }
+
+    private func homeDeckOpacity(for state: HomeDeckSectionState) -> Double {
+        switch state {
+        case .activeExpanded, .topCollapsed:
+            return 1
+        case .bottomPreview:
+            return 0.84
+        }
+    }
+
+    private func homeDeckZIndex(for state: HomeDeckSectionState) -> Double {
+        switch state {
+        case .activeExpanded:
+            return 3
+        case .topCollapsed:
+            return 2
+        case .bottomPreview:
+            return 1
         }
     }
 
     private func setActiveHomeSection(_ section: HomeSection) {
         guard section != activeHomeSection else { return }
-        withAnimation(.spring(response: 0.65, dampingFraction: 0.86, blendDuration: 0.08)) {
+        withAnimation(.spring(response: 0.72, dampingFraction: 0.88, blendDuration: 0.12)) {
             activeHomeSection = section
         }
+    }
+
+    private func homeDeckPosition(
+        for section: HomeSection,
+        topSections: [HomeSection],
+        bottomSections: [HomeSection],
+        topStackOrigin: CGFloat,
+        bottomStackTop: CGFloat,
+        tabHeight: CGFloat,
+        tabSpacing: CGFloat
+    ) -> (y: CGFloat, isPreview: Bool) {
+        if let topIndex = topSections.firstIndex(of: section) {
+            return (topStackOrigin + CGFloat(topIndex) * (tabHeight + tabSpacing), false)
+        }
+
+        if let bottomIndex = bottomSections.firstIndex(of: section) {
+            return (bottomStackTop + CGFloat(bottomIndex) * (tabHeight + tabSpacing), true)
+        }
+
+        return (.zero, false)
     }
 
     private var homeSectionGesture: some Gesture {
@@ -584,11 +690,25 @@ struct ContentView: View {
             }
     }
 
+    private func homeDeckSection(_ section: HomeSection, state: HomeDeckSectionState, topSafe: CGFloat) -> some View {
+        ZStack(alignment: .top) {
+            expandedHomeSection(section, topSafe: topSafe)
+                .opacity(state.isActive ? 1 : 0.001)
+                .allowsHitTesting(state.isActive)
+
+            homeSectionTab(for: section, isPreview: state.isPreview)
+                .opacity(state.isActive ? 0.001 : 1)
+                .allowsHitTesting(!state.isActive)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .clipped()
+    }
+
     @ViewBuilder
-    private func expandedHomeSection(topSafe: CGFloat) -> some View {
-        switch activeHomeSection {
+    private func expandedHomeSection(_ section: HomeSection, topSafe: CGFloat) -> some View {
+        switch section {
         case .readiness:
-            activeHomeSheet(title: activeHomeSection.title, topSafe: topSafe) {
+            activeHomeSheet(title: section.title, topSafe: topSafe) {
                 HeroZone(day: selectedDay, location: location, activity: selectedActivity,
                          conditionsTitle: conditionsTitle, conditionsSubtitle: conditionsSubtitle,
                          progress: 0, topInset: 0,
@@ -597,13 +717,13 @@ struct ContentView: View {
                     .clipped()
             }
         case .forecast:
-            activeHomeSheet(title: activeHomeSection.title, topSafe: topSafe) {
+            activeHomeSheet(title: section.title, topSafe: topSafe) {
                 forecastRows
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .clipped()
             }
         case .nearby:
-            activeHomeSheet(title: activeHomeSection.title, topSafe: topSafe) {
+            activeHomeSheet(title: section.title, topSafe: topSafe) {
                 nearbyTilesGrid
                     .padding(.top, 8)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -634,9 +754,8 @@ struct ContentView: View {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .stroke(.white.opacity(0.22), lineWidth: 0.5)
         )
-        .shadow(color: .black.opacity(0.24), radius: 18, x: 0, y: 10)
         .padding(.horizontal, 10)
-        .padding(.top, activeHomeSection == .readiness ? 0 : 8)
+        .padding(.top, title == HomeSection.readiness.title ? 0 : 8)
         .padding(.bottom, 8)
         .clipped()
     }
@@ -655,7 +774,7 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private func homeSectionTab(for section: HomeSection, topSafe: CGFloat, isPreview: Bool) -> some View {
+    private func homeSectionTab(for section: HomeSection, isPreview: Bool) -> some View {
         Button {
             setActiveHomeSection(section)
         } label: {
@@ -670,8 +789,7 @@ struct ContentView: View {
         }
         .buttonStyle(.plain)
         .frame(height: 38)
-        .opacity(isPreview ? 0.76 : 1)
-        .scaleEffect(isPreview ? 0.97 : 1)
+        .opacity(isPreview ? 0.82 : 1)
         .background {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(.ultraThinMaterial)
@@ -686,8 +804,6 @@ struct ContentView: View {
                 .shadow(color: .black.opacity(isPreview ? 0.08 : 0.14), radius: 8, x: 0, y: 4)
         }
         .padding(.horizontal, 16)
-        .padding(.top, topSafe > 0 ? topSafe + 6 : 0)
-        .frame(height: topSafe > 0 ? topSafe + 44 : 38, alignment: .bottom)
     }
 
     private var backgroundGradient: LinearGradient {
