@@ -459,12 +459,14 @@ struct ContentView: View {
             currentPageView
                 .transition(.opacity)
         }
-        .overlay(alignment: .bottom) {
+        .safeAreaInset(edge: .bottom) {
             BottomMenuPill(
                 selectedActivity: selectedActivity,
                 selectedItem: $currentPage
             )
-            .padding(.bottom, 18)
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 10)
         }
         .overlay {
             if isShowingConditions {
@@ -528,10 +530,9 @@ struct ContentView: View {
     /// fixed heights and the active section owns the remaining space.
     private var homePage: some View {
         GeometryReader { geo in
-            let topSafe = geo.safeAreaInsets.top
-            let bottomMenuClearance = geo.safeAreaInsets.bottom + 110
-            let menuBreathingRoom: CGFloat = 18
-            let tabHeight: CGFloat = 38
+            let topDeckPadding = geo.safeAreaInsets.top + 18
+            let bottomDeckPadding = geo.safeAreaInsets.bottom + 140
+            let tabHeight: CGFloat = 52
             let tabSpacing: CGFloat = homeTransitionPulse ? 12 : 8
             let sections = HomeSection.allCases
             let topSections = sections.filter { $0.rawValue < activeHomeSection.rawValue }
@@ -545,7 +546,7 @@ struct ContentView: View {
                         .opacity(1)
                 }
 
-                expandedHomeSection(activeHomeSection, topSafe: activeHomeSection == .readiness ? topSafe : 0)
+                expandedHomeSection(activeHomeSection, topSafe: 0)
                     .frame(maxHeight: .infinity, alignment: .top)
                     .scaleEffect(homeTransitionPulse ? 0.985 : 1, anchor: .top)
                     .shadow(
@@ -564,8 +565,8 @@ struct ContentView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .padding(.top, topSections.isEmpty ? 0 : topSafe + 8)
-            .padding(.bottom, bottomMenuClearance + menuBreathingRoom)
+            .padding(.top, topDeckPadding)
+            .padding(.bottom, bottomDeckPadding)
             .clipped()
             .contentShape(Rectangle())
             .simultaneousGesture(homeSectionGesture)
@@ -681,7 +682,7 @@ struct ContentView: View {
             }
         }
         .buttonStyle(.plain)
-        .frame(height: 38)
+        .frame(height: 52)
         .opacity(isBottomCollapsed ? 0.9 : 1)
         .background {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -907,7 +908,7 @@ private struct ReadinessCollapsedHeader: View {
     let day: DayForecast
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 5) {
             Text(HomeSection.readiness.title)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.white.opacity(0.78))
@@ -927,6 +928,7 @@ private struct ReadinessCollapsedHeader: View {
             }
         }
         .padding(.horizontal, 20)
+        .padding(.vertical, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         .contentShape(Rectangle())
     }
@@ -938,7 +940,7 @@ private struct ForecastCollapsedHeader: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(HomeSection.forecast.title)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.82))
@@ -951,6 +953,7 @@ private struct ForecastCollapsedHeader: View {
             VerdictPill(verdict: day.verdict, emphasized: false)
         }
         .padding(.horizontal, 20)
+        .padding(.vertical, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         .contentShape(Rectangle())
     }
@@ -966,7 +969,7 @@ private struct NearbyCollapsedHeader: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(HomeSection.nearby.title)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.82))
@@ -981,6 +984,7 @@ private struct NearbyCollapsedHeader: View {
             }
         }
         .padding(.horizontal, 20)
+        .padding(.vertical, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         .contentShape(Rectangle())
     }
