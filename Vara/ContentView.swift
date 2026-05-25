@@ -53,6 +53,28 @@ enum MenuItem: String, CaseIterable, Identifiable {
     }
 }
 
+enum HomeSection: Int, CaseIterable, Identifiable {
+    case readiness, forecast, nearby
+
+    var id: Int { rawValue }
+
+    var title: String {
+        switch self {
+        case .readiness: return "Right Now"
+        case .forecast: return "7-Day Forecast"
+        case .nearby: return "Nearby"
+        }
+    }
+
+    var previous: HomeSection? {
+        HomeSection(rawValue: rawValue - 1)
+    }
+
+    var next: HomeSection? {
+        HomeSection(rawValue: rawValue + 1)
+    }
+}
+
 enum Verdict: String {
     case go = "GO"
     case caution = "CAUTION"
@@ -394,10 +416,9 @@ struct ContentView: View {
     @State private var selectedDayIndex: Int = 0
     @State private var isShowingConditions: Bool = false
     @State private var selectedSpot: TrailSpot? = nil
+    @State private var activeHomeSection: HomeSection = .readiness
+    @State private var homeTransitionPulse: Bool = false
     @State private var scrollOffset: CGFloat = 0
-    /// Natural content height of the expanded hero — measured live via a hidden
-    /// probe so `expandedHeroHeight` actually hugs the content instead of guessing.
-    @State private var measuredHeroHeight: CGFloat = 580
 
     // Floating menu state
     @State private var location: String = "Boulder, CO"
@@ -466,6 +487,16 @@ struct ContentView: View {
             if isShowingConditions { isShowingConditions = false }
             if selectedSpot != nil { selectedSpot = nil }
         }
+        .onChange(of: activeHomeSection) { _, newValue in
+            scrollOffset = CGFloat(newValue.rawValue) * 320
+            homeTransitionPulse = true
+            Task {
+                try? await Task.sleep(for: .milliseconds(420))
+                await MainActor.run {
+                    homeTransitionPulse = false
+                }
+            }
+        }
         .sensoryFeedback(.selection, trigger: selectedDayIndex)
         .sensoryFeedback(.selection, trigger: selectedActivity)
         .sensoryFeedback(.selection, trigger: currentPage)
@@ -492,80 +523,169 @@ struct ContentView: View {
         }
     }
 
-    /// Home page (Path A): deterministic pin geometry.
-    /// - Hero and section headers are measured in one shared "home" coordinate
-    ///   space, so each header pins exactly at the hero's collapsed bottom
-    ///   (`collapsedHeroHeight`) and hands off to the next section.
-    /// - The collapsing hero is a plain overlay that ignores hits, so drags
-    ///   always reach the scroll view (no trapped gesture).
-    /// - No `safeAreaInset` for the pin line and no `pinnedViews:`.
+    /// Home page: three intentional stacked sections. Collapsed headers have
+    /// fixed heights and the active section owns the remaining space.
     private var homePage: some View {
         GeometryReader { geo in
             let topSafe = geo.safeAreaInsets.top
-            let expandedHeroHeight = min(geo.size.height * 0.92, max(360, measuredHeroHeight))
-            let collapsedHeroHeight: CGFloat = topSafe + 70
-            let shrinkRange = max(1, expandedHeroHeight - collapsedHeroHeight)
-            let currentHeroHeight = min(
-                expandedHeroHeight,
-                max(collapsedHeroHeight, expandedHeroHeight - scrollOffset)
-            )
-            let progress: CGFloat = (expandedHeroHeight - currentHeroHeight) / shrinkRange
 
-            ZStack(alignment: .top) {
-                // Invisible probe to measure the hero's natural content height.
-                HeroZone(day: selectedDay, location: location, activity: selectedActivity,
-                         conditionsTitle: conditionsTitle, conditionsSubtitle: conditionsSubtitle,
-                         progress: 0, topInset: topSafe, onConditionsTap: {})
-                    .background(GeometryReader { p in
-                        Color.clear.preference(key: HeroContentHeightKey.self, value: p.size.height)
-                    })
-                    .frame(maxWidth: .infinity)
-                    .opacity(0)
-                    .allowsHitTesting(false)
+            VStack(spacing: homeTransitionPulse ? 12 : 0) {
+                ForEach(HomeSection.allCases.filter { $0.rawValue < activeHomeSection.rawValue }) { section in
+                    collapsedHomeHeader(for: section, topSafe: section == .readiness ? topSafe : 0)
+                        .zIndex(1)
+                }
 
+                expandedHomeSection(topSafe: activeHomeSection == .readiness ? topSafe : 0)
+                    .frame(maxHeight: .infinity)
+                    .id(activeHomeSection)
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .bottom).combined(with: .opacity),
+                        removal: .move(edge: .top).combined(with: .opacity)
+                    ))
+                    .scaleEffect(homeTransitionPulse ? 0.985 : 1, anchor: .top)
+                    .zIndex(2)
+
+                ForEach(HomeSection.allCases.filter { $0.rawValue > activeHomeSection.rawValue }) { section in
+                    collapsedHomeHeader(for: section, topSafe: 0)
+                        .zIndex(0)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .clipped()
+            .contentShape(Rectangle())
+            .simultaneousGesture(homeSectionGesture)
+            .animation(.spring(response: 0.58, dampingFraction: 0.82, blendDuration: 0.08), value: activeHomeSection)
+            .animation(.spring(response: 0.42, dampingFraction: 0.84), value: homeTransitionPulse)
+        }
+    }
+
+    private func setActiveHomeSection(_ section: HomeSection) {
+        guard section != activeHomeSection else { return }
+        withAnimation(.spring(response: 0.58, dampingFraction: 0.82, blendDuration: 0.08)) {
+            activeHomeSection = section
+        }
+    }
+
+    private var homeSectionGesture: some Gesture {
+        DragGesture(minimumDistance: 36, coordinateSpace: .local)
+            .onEnded { value in
+                let vertical = value.translation.height
+                guard abs(vertical) > abs(value.translation.width) * 1.35, abs(vertical) > 70 else {
+                    return
+                }
+
+                if vertical < 0, let next = activeHomeSection.next {
+                    setActiveHomeSection(next)
+                } else if vertical > 0, let previous = activeHomeSection.previous {
+                    setActiveHomeSection(previous)
+                }
+            }
+    }
+
+    @ViewBuilder
+    private func expandedHomeSection(topSafe: CGFloat) -> some View {
+        switch activeHomeSection {
+        case .readiness:
+            activeHomeSheet(title: activeHomeSection.title, topSafe: topSafe) {
                 ScrollView {
-                    VStack(spacing: 0) {
-                        // Spacer = expanded hero, so the first section starts at the
-                        // expanded hero's bottom edge.
-                        Color.clear.frame(height: expandedHeroHeight)
-
-                        StickySection(title: "7-DAY FORECAST", pinLine: collapsedHeroHeight) {
-                            forecastRows
-                        }
-                        StickySection(title: "NEARBY TRAILS & PARKS", pinLine: collapsedHeroHeight) {
-                            nearbyTilesGrid
-                        }
-
-                        Color.clear.frame(height: 120)
-                    }
+                    HeroZone(day: selectedDay, location: location, activity: selectedActivity,
+                             conditionsTitle: conditionsTitle, conditionsSubtitle: conditionsSubtitle,
+                             progress: 0, topInset: 0,
+                             onConditionsTap: { isShowingConditions = true })
+                        .frame(maxWidth: .infinity)
+                    Color.clear.frame(height: 110)
                 }
                 .scrollIndicators(.hidden)
-                // Start the content at the container's top edge so section positions
-                // share the hero's origin (both live in the "home" space below).
-                .ignoresSafeArea(.container, edges: .top)
-                .onScrollGeometryChange(for: CGFloat.self) { g in
-                    g.contentOffset.y + g.contentInsets.top
-                } action: { _, newValue in
-                    scrollOffset = max(0, newValue)
+            }
+        case .forecast:
+            activeHomeSheet(title: activeHomeSection.title, topSafe: topSafe) {
+                ScrollView {
+                    forecastRows
+                    Color.clear.frame(height: 110)
                 }
+                .scrollIndicators(.hidden)
+            }
+        case .nearby:
+            activeHomeSheet(title: activeHomeSection.title, topSafe: topSafe) {
+                ScrollView {
+                    nearbyTilesGrid
+                        .padding(.top, 8)
+                    Color.clear.frame(height: 110)
+                }
+                .scrollIndicators(.hidden)
+            }
+        }
+    }
 
-                // Collapsing hero overlay. Ignores hits so drags always scroll the list
-                // (this is what was trapping the scroll-up gesture before).
-                HeroZone(day: selectedDay, location: location, activity: selectedActivity,
-                         conditionsTitle: conditionsTitle, conditionsSubtitle: conditionsSubtitle,
-                         progress: progress, topInset: topSafe,
-                         onConditionsTap: { isShowingConditions = true })
-                    .frame(height: currentHeroHeight, alignment: .top)
-                    .frame(maxWidth: .infinity)
-                    .clipped()
-                    .allowsHitTesting(false)
+    private func activeHomeSheet<Content: View>(
+        title: String,
+        topSafe: CGFloat,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(spacing: homeTransitionPulse ? 14 : 8) {
+            expandedSectionTitle(title, topSafe: topSafe)
+            content()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background {
+            ZStack {
+                Rectangle().fill(.ultraThinMaterial)
+                Color.white.opacity(0.08)
+                Color.black.opacity(0.08)
             }
-            .coordinateSpace(.named("home"))
-            .onPreferenceChange(HeroContentHeightKey.self) { newValue in
-                if newValue > 0, abs(newValue - measuredHeroHeight) > 1 {
-                    measuredHeroHeight = newValue
-                }
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(.white.opacity(0.22), lineWidth: 0.5)
+        )
+        .shadow(color: .black.opacity(0.24), radius: 18, x: 0, y: 10)
+        .padding(.horizontal, 10)
+        .padding(.top, activeHomeSection == .readiness ? 0 : 8)
+        .padding(.bottom, 8)
+    }
+
+    private func expandedSectionTitle(_ title: String, topSafe: CGFloat) -> some View {
+        HStack {
+            Text(title)
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(.white)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, topSafe + 14)
+        .padding(.bottom, 2)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func collapsedHomeHeader(for section: HomeSection, topSafe: CGFloat) -> some View {
+        Button {
+            setActiveHomeSection(section)
+        } label: {
+            switch section {
+            case .readiness:
+                ReadinessCollapsedHeader(day: selectedDay)
+            case .forecast:
+                ForecastCollapsedHeader(day: selectedDay, isToday: isViewingToday)
+            case .nearby:
+                NearbyCollapsedHeader(spots: MockData.nearbySpots)
             }
+        }
+        .buttonStyle(.plain)
+        .padding(.top, topSafe)
+        .frame(height: topSafe + 62)
+        .background {
+            ZStack {
+                Rectangle().fill(.ultraThinMaterial)
+                Color.black.opacity(0.16)
+            }
+            .ignoresSafeArea(edges: topSafe > 0 ? .top : [])
+        }
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(.white.opacity(0.20))
+                .frame(height: 0.5)
         }
     }
 
@@ -771,47 +891,97 @@ struct ContentView: View {
 
 }
 
-// MARK: - Sticky Section
+// MARK: - Home Collapsed Headers
 
-/// A section whose header sticks just below the collapsing hero (at `pinLine`,
-/// measured in the shared "home" coordinate space) and hands off to the next
-/// section. Pure geometry: no pinnedViews, no safeAreaInset.
-private struct StickySection<Content: View>: View {
-    let title: String
-    let pinLine: CGFloat
-    @ViewBuilder var content: () -> Content
-
-    private let headerHeight: CGFloat = 44
+private struct ReadinessCollapsedHeader: View {
+    let day: DayForecast
 
     var body: some View {
-        content()
-            .padding(.top, headerHeight)              // reserve room for the pinned header
-            .overlay(alignment: .top) {
-                GeometryReader { proxy in
-                    let top = proxy.frame(in: .named("home")).minY
-                    let h = proxy.size.height
-                    // Pin at pinLine, but never above the section's own top and never
-                    // below its bottom, which produces the hand-off to the next section.
-                    let pinned = max(top, min(pinLine, top + h - headerHeight))
-                    header.offset(y: pinned - top)
-                }
+        VStack(alignment: .leading, spacing: 3) {
+            Text(HomeSection.readiness.title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.78))
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(day.verdict.color)
+                    .frame(width: 8, height: 8)
+                Text(day.verdict.rawValue)
+                    .font(.headline.weight(.bold))
+                    .tracking(day.verdict == .noGo ? -0.4 : 0)
+                    .foregroundStyle(.white)
+                Text(day.verdict.headline)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.92))
+                    .lineLimit(1)
+                Spacer(minLength: 0)
             }
+        }
+        .padding(.horizontal, 20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct ForecastCollapsedHeader: View {
+    let day: DayForecast
+    let isToday: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(HomeSection.forecast.title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.82))
+                Text(summary)
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.88))
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+            VerdictPill(verdict: day.verdict, emphasized: false)
+        }
+        .padding(.horizontal, 20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .contentShape(Rectangle())
     }
 
-    private var header: some View {
-        Text(title)
-            .font(.caption.weight(.semibold))
-            .tracking(1.5)
-            .foregroundStyle(.white.opacity(0.88))
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 24)
-            .frame(height: headerHeight)
-            .background {
-                ZStack {
-                    Rectangle().fill(.ultraThinMaterial)
-                    Color.black.opacity(0.18)
-                }
+    private var summary: String {
+        let label = isToday ? "Today" : day.date.formatted(.dateTime.weekday(.abbreviated))
+        return "\(label) · \(day.high)° / \(day.low)° · \(day.condition)"
+    }
+}
+
+private struct NearbyCollapsedHeader: View {
+    let spots: [TrailSpot]
+
+    var body: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(HomeSection.nearby.title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.82))
+                Text(summary)
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.88))
+                    .lineLimit(1)
             }
+            Spacer(minLength: 0)
+            if let bestSpot {
+                VerdictPill(verdict: bestSpot.verdict, emphasized: false)
+            }
+        }
+        .padding(.horizontal, 20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .contentShape(Rectangle())
+    }
+
+    private var bestSpot: TrailSpot? {
+        spots.first { $0.verdict == .go } ?? spots.first
+    }
+
+    private var summary: String {
+        guard let bestSpot else { return "\(spots.count) nearby spots" }
+        return "\(spots.count) spots · Best: \(bestSpot.name)"
     }
 }
 
@@ -884,8 +1054,6 @@ struct TrailTile: View {
     let spot: TrailSpot
     let onTap: () -> Void
 
-    @State private var isPressed: Bool = false
-
     var body: some View {
         Button(action: onTap) {
             VStack(alignment: .leading, spacing: 8) {
@@ -925,30 +1093,30 @@ struct TrailTile: View {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .stroke(.white.opacity(0.16), lineWidth: 0.5)
             )
-            .scaleEffect(isPressed ? 0.97 : 1.0)
-            .animation(.easeInOut(duration: 0.12), value: isPressed)
         }
-        .buttonStyle(.plain)
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in isPressed = true }
-                .onEnded { _ in isPressed = false }
-        )
+        .buttonStyle(PressScaleButtonStyle())
         .accessibilityLabel("\(spot.name), \(spot.kind.label.lowercased()), \(spot.detail), \(spot.verdict.rawValue)")
+    }
+}
+
+private struct PressScaleButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
+            .animation(.easeInOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 
 // MARK: - Hero Zone
 //
-// The sticky three-section header on the home page: verdict → insights (what to
-// expect / down-time prep) → current conditions row. Driven by a 0…1 `progress`
-// value that comes from scroll offset: 0 = fully expanded (fills the screen),
-// 1 = fully collapsed (a compact persistent bar).
+// Readiness content for the home page: verdict → insights (what to expect /
+// down-time prep) → current conditions row. The section model now drives
+// `progress` as a discrete expanded/collapsed value instead of binding it to
+// raw scroll offset.
 //
-// A single layout interpolates sizes/paddings/opacities continuously so no two
-// rendered states ever overlap. A row-layout swap (vertical insights ↔ icon row,
-// full conditions ↔ compact conditions) happens once past `isCondensed` and is
-// animated so the discrete change still reads as continuous.
+// A single layout interpolates sizes/paddings/opacities continuously, then
+// drops the expanded-only rows once past `isCondensed` so the collapsed height
+// remains realistic.
 
 struct HeroZone: View {
     let day: DayForecast
@@ -967,8 +1135,8 @@ struct HeroZone: View {
         }
     }
 
-    /// True once we're far enough into the collapse that we should swap the
-    /// row layouts (insights → icon row, conditions → compact row).
+    /// True once we're far enough into the collapse that only the compact
+    /// verdict/headline bar should remain.
     private var isCondensed: Bool { progress > 0.5 }
 
     /// Linearly interpolates a → b based on `progress`.
@@ -994,8 +1162,8 @@ struct HeroZone: View {
                 insightsBlock
                     .opacity(fadeOut(by: 0.5))
                     .transition(.opacity)
+                conditionsBlock
             }
-            conditionsBlock
         }
         .padding(.horizontal, 20)
         .padding(.top, topInset + lerp(10, 6))
@@ -1491,24 +1659,6 @@ struct FactorSection: View {
                 }
             }
         }
-    }
-}
-
-// MARK: - Scroll Offset Plumbing
-
-struct ScrollOffsetKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
-
-/// Published by the invisible expanded-hero probe so the home page can size
-/// `expandedHeroHeight` to the natural content height.
-struct HeroContentHeightKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
     }
 }
 
