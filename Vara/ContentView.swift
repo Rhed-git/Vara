@@ -492,14 +492,13 @@ struct ContentView: View {
         }
     }
 
-    /// Home page architecture (Session 004 fix):
-    /// - `safeAreaInset(.top)` reserves a FIXED-height strip (`pinInset`) where the
-    ///   LazyVStack's pinned section headers pin. It's never tied to `scrollOffset`,
-    ///   so there's no feedback loop between the scroll offset and the inset height.
-    /// - A transparent spacer of `shrinkRange` sits above the LazyVStack so the
-    ///   first section begins at the expanded hero's bottom edge on first render.
-    /// - The collapsing hero is a plain overlay in the ZStack on top of the
-    ///   scroll view (the layout that collapsed correctly pre-restructure).
+    /// Home page (Path A): deterministic pin geometry.
+    /// - Hero and section headers are measured in one shared "home" coordinate
+    ///   space, so each header pins exactly at the hero's collapsed bottom
+    ///   (`collapsedHeroHeight`) and hands off to the next section.
+    /// - The collapsing hero is a plain overlay that ignores hits, so drags
+    ///   always reach the scroll view (no trapped gesture).
+    /// - No `safeAreaInset` for the pin line and no `pinnedViews:`.
     private var homePage: some View {
         GeometryReader { geo in
             let topSafe = geo.safeAreaInsets.top
@@ -511,9 +510,6 @@ struct ContentView: View {
                 max(collapsedHeroHeight, expandedHeroHeight - scrollOffset)
             )
             let progress: CGFloat = (expandedHeroHeight - currentHeroHeight) / shrinkRange
-            // Fixed strip that marks where the pinned headers pin (just under the
-            // collapsed hero). Never scroll-dependent.
-            let pinInset = max(0, collapsedHeroHeight - topSafe)
 
             ZStack(alignment: .top) {
                 // Invisible probe to measure the hero's natural content height.
@@ -529,33 +525,32 @@ struct ContentView: View {
 
                 ScrollView {
                     VStack(spacing: 0) {
-                        // Spacer covering the expanded hero above the pinned line, so the
-                        // first section begins at the expanded hero's bottom edge.
-                        Color.clear.frame(height: shrinkRange)
+                        // Spacer = expanded hero, so the first section starts at the
+                        // expanded hero's bottom edge.
+                        Color.clear.frame(height: expandedHeroHeight)
 
-                        LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
-                            Section { forecastRows } header: {
-                                pinnedSectionHeader(title: "7-DAY FORECAST")
-                            }
-                            Section { nearbyTilesGrid } header: {
-                                pinnedSectionHeader(title: "NEARBY TRAILS & PARKS")
-                            }
-                            Color.clear.frame(height: 120)
+                        StickySection(title: "7-DAY FORECAST", pinLine: collapsedHeroHeight) {
+                            forecastRows
                         }
+                        StickySection(title: "NEARBY TRAILS & PARKS", pinLine: collapsedHeroHeight) {
+                            nearbyTilesGrid
+                        }
+
+                        Color.clear.frame(height: 120)
                     }
                 }
                 .scrollIndicators(.hidden)
-                .onScrollGeometryChange(for: CGFloat.self) { geo in
-                    geo.contentOffset.y + geo.contentInsets.top
+                // Start the content at the container's top edge so section positions
+                // share the hero's origin (both live in the "home" space below).
+                .ignoresSafeArea(.container, edges: .top)
+                .onScrollGeometryChange(for: CGFloat.self) { g in
+                    g.contentOffset.y + g.contentInsets.top
                 } action: { _, newValue in
                     scrollOffset = max(0, newValue)
                 }
-                // FIXED inset: stable pin line, no feedback with scrollOffset.
-                .safeAreaInset(edge: .top, spacing: 0) {
-                    Color.clear.frame(height: pinInset)
-                }
 
-                // Collapsing hero as a plain overlay on top.
+                // Collapsing hero overlay. Ignores hits so drags always scroll the list
+                // (this is what was trapping the scroll-up gesture before).
                 HeroZone(day: selectedDay, location: location, activity: selectedActivity,
                          conditionsTitle: conditionsTitle, conditionsSubtitle: conditionsSubtitle,
                          progress: progress, topInset: topSafe,
@@ -563,7 +558,9 @@ struct ContentView: View {
                     .frame(height: currentHeroHeight, alignment: .top)
                     .frame(maxWidth: .infinity)
                     .clipped()
+                    .allowsHitTesting(false)
             }
+            .coordinateSpace(.named("home"))
             .onPreferenceChange(HeroContentHeightKey.self) { newValue in
                 if newValue > 0, abs(newValue - measuredHeroHeight) > 1 {
                     measuredHeroHeight = newValue
@@ -772,18 +769,43 @@ struct ContentView: View {
         .padding(.top, 4)
     }
 
-    /// Pinned section header rendered behind a translucent frosted bar so rows
-    /// don't bleed through while it's pinned at the top of the scroll view's
-    /// safe area (which itself sits just below the collapsing hero).
-    private func pinnedSectionHeader(title: String) -> some View {
+}
+
+// MARK: - Sticky Section
+
+/// A section whose header sticks just below the collapsing hero (at `pinLine`,
+/// measured in the shared "home" coordinate space) and hands off to the next
+/// section. Pure geometry: no pinnedViews, no safeAreaInset.
+private struct StickySection<Content: View>: View {
+    let title: String
+    let pinLine: CGFloat
+    @ViewBuilder var content: () -> Content
+
+    private let headerHeight: CGFloat = 44
+
+    var body: some View {
+        content()
+            .padding(.top, headerHeight)              // reserve room for the pinned header
+            .overlay(alignment: .top) {
+                GeometryReader { proxy in
+                    let top = proxy.frame(in: .named("home")).minY
+                    let h = proxy.size.height
+                    // Pin at pinLine, but never above the section's own top and never
+                    // below its bottom, which produces the hand-off to the next section.
+                    let pinned = max(top, min(pinLine, top + h - headerHeight))
+                    header.offset(y: pinned - top)
+                }
+            }
+    }
+
+    private var header: some View {
         Text(title)
             .font(.caption.weight(.semibold))
             .tracking(1.5)
             .foregroundStyle(.white.opacity(0.88))
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 24)
-            .padding(.top, 18)
-            .padding(.bottom, 10)
+            .frame(height: headerHeight)
             .background {
                 ZStack {
                     Rectangle().fill(.ultraThinMaterial)
