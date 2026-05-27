@@ -428,34 +428,20 @@ struct ContentView: View {
     @State private var currentPage: MenuItem = .home
 
     private let forecast = MockData.sevenDays
+    private var rightNowDay: DayForecast { forecast[0] }
     private var selectedDay: DayForecast { forecast[selectedDayIndex] }
-    private var currentCondition: WeatherCondition { selectedDay.weatherCondition }
+    private var rightNowCondition: WeatherCondition { rightNowDay.weatherCondition }
+    private var selectedForecastCondition: WeatherCondition { selectedDay.weatherCondition }
     private var isViewingToday: Bool { selectedDayIndex == 0 }
-    private var conditionsTitle: String { isViewingToday ? "Current Conditions" : "Expected Conditions" }
-    private var conditionsSubtitle: String {
-        let core = "\(selectedDay.high)°  ·  \(selectedDay.condition)  ·  Tap for details"
-        if isViewingToday { return core }
-        let weekday = selectedDay.date.formatted(.dateTime.weekday(.abbreviated))
-        return "\(weekday)  ·  \(core)"
+    private var rightNowConditionsSubtitle: String {
+        "\(rightNowDay.high)°  ·  \(rightNowDay.condition)  ·  Tap for details"
     }
 
     var body: some View {
         ZStack {
-            // Background — shared across all pages so the gradient/atmosphere persists
-            // when navigating between Home, Location, Activity, Preferences, Account.
-            ZStack {
-                backgroundGradient
-                atmosphericOverlay
-                WeatherEffectLayer(
-                    condition: currentCondition,
-                    // Fade weather effects on non-home pages by feigning a deep scroll.
-                    scrollOffset: currentPage == .home ? scrollOffset : 600
-                )
-            }
-            .ignoresSafeArea()
-            .animation(.easeInOut(duration: 0.55), value: selectedDayIndex)
-            .animation(.easeInOut(duration: 0.55), value: currentCondition)
-            .animation(.easeInOut(duration: 0.35), value: currentPage)
+            VaraTopoBackground()
+                .ignoresSafeArea()
+                .animation(.easeInOut(duration: 0.35), value: currentPage)
 
             VStack(spacing: 16) {
                 // Page content — switches based on the bottom pill selection.
@@ -474,7 +460,7 @@ struct ContentView: View {
         }
         .overlay {
             if isShowingConditions {
-                ConditionsIsland(day: selectedDay, title: conditionsTitle) {
+                ConditionsIsland(day: rightNowDay, title: "Current Conditions") {
                     isShowingConditions = false
                 }
                 .zIndex(10)
@@ -628,9 +614,14 @@ struct ContentView: View {
     private func expandedHomeSection(_ section: HomeSection, topSafe: CGFloat, availableHeight: CGFloat) -> some View {
         switch section {
         case .readiness:
-            activeHomeSheet(title: section.title, topSafe: topSafe) {
-                HeroZone(day: selectedDay, location: location, activity: selectedActivity,
-                         conditionsTitle: conditionsTitle, conditionsSubtitle: conditionsSubtitle,
+            activeHomeSheet(
+                title: section.title,
+                topSafe: topSafe,
+                weatherCondition: rightNowCondition,
+                verdict: rightNowDay.verdict
+            ) {
+                HeroZone(day: rightNowDay, location: location, activity: selectedActivity,
+                         conditionsTitle: "Current Conditions", conditionsSubtitle: rightNowConditionsSubtitle,
                          progress: 0, topInset: 0,
                          insightLimit: availableHeight < 520 ? 4 : 5,
                          onConditionsTap: {
@@ -641,7 +632,12 @@ struct ContentView: View {
                     .clipped()
             }
         case .forecast:
-            activeHomeSheet(title: section.title, topSafe: topSafe) {
+            activeHomeSheet(
+                title: section.title,
+                topSafe: topSafe,
+                weatherCondition: selectedForecastCondition,
+                verdict: selectedDay.verdict
+            ) {
                 forecastRows
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .clipped()
@@ -659,6 +655,8 @@ struct ContentView: View {
     private func activeHomeSheet<Content: View>(
         title: String,
         topSafe: CGFloat,
+        weatherCondition: WeatherCondition? = nil,
+        verdict: Verdict? = nil,
         @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(spacing: homeTransitionPulse ? 10 : 6) {
@@ -667,8 +665,7 @@ struct ContentView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(.ultraThinMaterial)
+            activeHomeSheetBackground(weatherCondition: weatherCondition, verdict: verdict)
         }
         .overlay(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
@@ -678,6 +675,32 @@ struct ContentView: View {
         .padding(.top, title == HomeSection.readiness.title ? 0 : 6)
         .padding(.bottom, 6)
         .clipped()
+    }
+
+    @ViewBuilder
+    private func activeHomeSheetBackground(
+        weatherCondition: WeatherCondition?,
+        verdict: Verdict?
+    ) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
+
+        ZStack {
+            shape.fill(Color.black.opacity(0.28))
+
+            if let weatherCondition, let verdict {
+                LocalizedWeatherBackground(condition: weatherCondition, verdict: verdict)
+                    .clipShape(shape)
+                    .transition(.opacity)
+            } else {
+                VaraTopoBackground()
+                    .clipShape(shape)
+                    .opacity(0.72)
+            }
+
+            shape.fill(.ultraThinMaterial)
+        }
+        .clipShape(shape)
+        .animation(.easeInOut(duration: 0.45), value: weatherCondition)
     }
 
     private func expandedSectionTitle(_ title: String, topSafe: CGFloat) -> some View {
@@ -700,7 +723,7 @@ struct ContentView: View {
         } label: {
             switch section {
             case .readiness:
-                ReadinessCollapsedHeader(day: selectedDay)
+                ReadinessCollapsedHeader(day: rightNowDay)
             case .forecast:
                 ForecastCollapsedHeader(day: selectedDay, isToday: isViewingToday)
             case .nearby:
@@ -720,158 +743,6 @@ struct ContentView: View {
                 .shadow(color: .black.opacity(isBottomCollapsed ? 0.06 : 0.10), radius: 7, x: 0, y: 3)
         }
         .padding(.horizontal, 16)
-    }
-
-    private var backgroundGradient: LinearGradient {
-        let pair = backgroundColors
-        return LinearGradient(
-            colors: [pair.top, pair.bottom],
-            startPoint: .top,
-            endPoint: .bottom
-        )
-    }
-
-    private var backgroundColors: (top: Color, bottom: Color) {
-        switch (selectedDay.verdict, currentCondition) {
-        // Snow overrides verdict — same wash regardless.
-        case (_, .snow):
-            return (Color(red: 0.48, green: 0.55, blue: 0.62),
-                    Color(red: 0.65, green: 0.70, blue: 0.75))
-
-        // GO
-        case (.go, .clear):
-            return (Color(red: 0.27, green: 0.49, blue: 0.38),
-                    Color(red: 0.42, green: 0.61, blue: 0.50))
-        case (.go, .partlyCloudy):
-            return (Color(red: 0.32, green: 0.47, blue: 0.42),
-                    Color(red: 0.48, green: 0.60, blue: 0.53))
-        case (.go, .cloudy), (.go, .overcast), (.go, .rain), (.go, .storm):
-            return (Color(red: 0.36, green: 0.45, blue: 0.43),
-                    Color(red: 0.50, green: 0.58, blue: 0.55))
-
-        // CAUTION
-        case (.caution, .clear):
-            return (Color(red: 0.62, green: 0.45, blue: 0.22),
-                    Color(red: 0.78, green: 0.58, blue: 0.32))
-        case (.caution, .partlyCloudy), (.caution, .cloudy), (.caution, .overcast):
-            return (Color(red: 0.48, green: 0.40, blue: 0.28),
-                    Color(red: 0.62, green: 0.52, blue: 0.40))
-        case (.caution, .rain), (.caution, .storm):
-            return (Color(red: 0.38, green: 0.35, blue: 0.32),
-                    Color(red: 0.55, green: 0.48, blue: 0.42))
-
-        // NO-GO
-        case (.noGo, .clear):
-            return (Color(red: 0.42, green: 0.28, blue: 0.30),
-                    Color(red: 0.55, green: 0.40, blue: 0.42))
-        case (.noGo, .partlyCloudy), (.noGo, .cloudy), (.noGo, .overcast):
-            return (Color(red: 0.28, green: 0.30, blue: 0.34),
-                    Color(red: 0.45, green: 0.45, blue: 0.48))
-        case (.noGo, .rain), (.noGo, .storm):
-            return (Color(red: 0.22, green: 0.26, blue: 0.32),
-                    Color(red: 0.38, green: 0.42, blue: 0.48))
-        }
-    }
-
-    // MARK: Atmosphere — condition-aware sky layers stacked over the linear gradient.
-
-    private var atmosphericOverlay: some View {
-        ZStack {
-            primarySkyHighlight
-            cloudLayer
-            precipitationDarkening
-        }
-    }
-
-    /// Primary "light source" — a sun-like spot for clear/partly cloudy, a diffuse glow for
-    /// cloudy/overcast/snow, and a dim, central wash for rain/storm.
-    private var primarySkyHighlight: some View {
-        let cfg = skyHighlightConfig
-        return RadialGradient(
-            colors: [.white.opacity(cfg.opacity), .clear],
-            center: UnitPoint(x: cfg.x, y: cfg.y),
-            startRadius: 0,
-            endRadius: cfg.radius
-        )
-    }
-
-    private var skyHighlightConfig: (x: CGFloat, y: CGFloat, opacity: Double, radius: CGFloat) {
-        switch currentCondition {
-        case .clear:        return (0.72, 0.04, 0.55, 340)  // sun, upper-right
-        case .partlyCloudy: return (0.68, 0.06, 0.42, 360)  // sun peeking through
-        case .cloudy:       return (0.50, 0.10, 0.24, 480)  // diffuse, centered
-        case .overcast:     return (0.50, 0.15, 0.14, 540)  // very diffuse
-        case .rain:         return (0.50, 0.08, 0.10, 380)  // dim
-        case .storm:        return (0.50, 0.05, 0.07, 320)  // dimmer
-        case .snow:         return (0.50, 0.08, 0.50, 600)  // bright, reflective
-        }
-    }
-
-    /// Soft elliptical "cloud" blobs for conditions with visible cloud cover.
-    @ViewBuilder
-    private var cloudLayer: some View {
-        switch currentCondition {
-        case .partlyCloudy:
-            ZStack {
-                EllipticalGradient(
-                    colors: [.white.opacity(0.22), .clear],
-                    center: UnitPoint(x: 0.22, y: 0.18),
-                    startRadiusFraction: 0,
-                    endRadiusFraction: 0.32
-                )
-                EllipticalGradient(
-                    colors: [.white.opacity(0.16), .clear],
-                    center: UnitPoint(x: 0.92, y: 0.30),
-                    startRadiusFraction: 0,
-                    endRadiusFraction: 0.26
-                )
-            }
-        case .cloudy, .overcast:
-            ZStack {
-                EllipticalGradient(
-                    colors: [.white.opacity(0.20), .clear],
-                    center: UnitPoint(x: 0.25, y: 0.12),
-                    startRadiusFraction: 0,
-                    endRadiusFraction: 0.48
-                )
-                EllipticalGradient(
-                    colors: [.white.opacity(0.16), .clear],
-                    center: UnitPoint(x: 0.82, y: 0.22),
-                    startRadiusFraction: 0,
-                    endRadiusFraction: 0.42
-                )
-            }
-        case .snow:
-            EllipticalGradient(
-                colors: [.white.opacity(0.18), .clear],
-                center: UnitPoint(x: 0.5, y: 0.18),
-                startRadiusFraction: 0,
-                endRadiusFraction: 0.55
-            )
-        case .clear, .rain, .storm:
-            EmptyView()
-        }
-    }
-
-    /// Pulls the top edge down for rain/storm so the sky reads as heavy and overcast.
-    @ViewBuilder
-    private var precipitationDarkening: some View {
-        switch currentCondition {
-        case .rain:
-            LinearGradient(
-                colors: [.black.opacity(0.22), .clear],
-                startPoint: .top,
-                endPoint: UnitPoint(x: 0.5, y: 0.38)
-            )
-        case .storm:
-            LinearGradient(
-                colors: [.black.opacity(0.32), .clear],
-                startPoint: .top,
-                endPoint: UnitPoint(x: 0.5, y: 0.42)
-            )
-        default:
-            EmptyView()
-        }
     }
 
     // MARK: 7-day forecast
@@ -1142,6 +1013,243 @@ private struct PressScaleButtonStyle: ButtonStyle {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
             .animation(.easeInOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+// MARK: - Stable App Background
+
+struct VaraTopoBackground: View {
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color(red: 0.035, green: 0.050, blue: 0.046),
+                    Color(red: 0.060, green: 0.083, blue: 0.074),
+                    Color(red: 0.020, green: 0.024, blue: 0.026)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            TopographicLinePattern()
+                .foregroundStyle(.white.opacity(0.07))
+                .blendMode(.screen)
+
+            LinearGradient(
+                colors: [
+                    .black.opacity(0.28),
+                    .clear,
+                    .black.opacity(0.36)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
+    }
+}
+
+private struct TopographicLinePattern: View {
+    var body: some View {
+        Canvas { context, size in
+            let stroke = StrokeStyle(lineWidth: 0.8, lineCap: .round, lineJoin: .round)
+            let horizontalStep: CGFloat = 118
+            let verticalStep: CGFloat = 96
+
+            for column in stride(from: -horizontalStep, through: size.width + horizontalStep, by: horizontalStep) {
+                for row in stride(from: -verticalStep, through: size.height + verticalStep, by: verticalStep) {
+                    let phase = ((column / horizontalStep) + (row / verticalStep)).truncatingRemainder(dividingBy: 3)
+                    let width = horizontalStep * (0.70 + phase * 0.10)
+                    let height = verticalStep * (0.56 + phase * 0.08)
+
+                    for ring in 0..<4 {
+                        let inset = CGFloat(ring) * 13
+                        let rect = CGRect(
+                            x: column - width / 2 + inset,
+                            y: row - height / 2 + inset,
+                            width: max(18, width - inset * 2),
+                            height: max(14, height - inset * 2)
+                        )
+                        context.stroke(Path(ellipseIn: rect), with: .color(.white.opacity(0.07)), style: stroke)
+                    }
+                }
+            }
+
+            for y in stride(from: CGFloat(-40), through: size.height + 80, by: 140) {
+                var path = Path()
+                path.move(to: CGPoint(x: -20, y: y))
+                path.addCurve(
+                    to: CGPoint(x: size.width + 20, y: y + 24),
+                    control1: CGPoint(x: size.width * 0.25, y: y - 38),
+                    control2: CGPoint(x: size.width * 0.72, y: y + 72)
+                )
+                context.stroke(path, with: .color(.white.opacity(0.06)), style: stroke)
+            }
+        }
+    }
+}
+
+// MARK: - Localized Weather Background
+
+struct LocalizedWeatherBackground: View {
+    let condition: WeatherCondition
+    let verdict: Verdict
+
+    var body: some View {
+        ZStack {
+            weatherBackgroundGradient(condition: condition, verdict: verdict)
+            WeatherAtmosphericOverlay(condition: condition)
+            WeatherEffectLayer(condition: condition, scrollOffset: 0)
+                .opacity(0.50)
+            LinearGradient(
+                colors: [.black.opacity(0.06), .black.opacity(0.24)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
+        .allowsHitTesting(false)
+    }
+
+    private func weatherBackgroundGradient(condition: WeatherCondition, verdict: Verdict) -> LinearGradient {
+        let pair = backgroundColors(condition: condition, verdict: verdict)
+        return LinearGradient(
+            colors: [pair.top, pair.bottom],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+
+    private func backgroundColors(condition: WeatherCondition, verdict: Verdict) -> (top: Color, bottom: Color) {
+        switch (verdict, condition) {
+        case (_, .snow):
+            return (Color(red: 0.48, green: 0.55, blue: 0.62),
+                    Color(red: 0.65, green: 0.70, blue: 0.75))
+        case (.go, .clear):
+            return (Color(red: 0.27, green: 0.49, blue: 0.38),
+                    Color(red: 0.42, green: 0.61, blue: 0.50))
+        case (.go, .partlyCloudy):
+            return (Color(red: 0.32, green: 0.47, blue: 0.42),
+                    Color(red: 0.48, green: 0.60, blue: 0.53))
+        case (.go, .cloudy), (.go, .overcast), (.go, .rain), (.go, .storm):
+            return (Color(red: 0.36, green: 0.45, blue: 0.43),
+                    Color(red: 0.50, green: 0.58, blue: 0.55))
+        case (.caution, .clear):
+            return (Color(red: 0.62, green: 0.45, blue: 0.22),
+                    Color(red: 0.78, green: 0.58, blue: 0.32))
+        case (.caution, .partlyCloudy), (.caution, .cloudy), (.caution, .overcast):
+            return (Color(red: 0.48, green: 0.40, blue: 0.28),
+                    Color(red: 0.62, green: 0.52, blue: 0.40))
+        case (.caution, .rain), (.caution, .storm):
+            return (Color(red: 0.38, green: 0.35, blue: 0.32),
+                    Color(red: 0.55, green: 0.48, blue: 0.42))
+        case (.noGo, .clear):
+            return (Color(red: 0.42, green: 0.28, blue: 0.30),
+                    Color(red: 0.55, green: 0.40, blue: 0.42))
+        case (.noGo, .partlyCloudy), (.noGo, .cloudy), (.noGo, .overcast):
+            return (Color(red: 0.28, green: 0.30, blue: 0.34),
+                    Color(red: 0.45, green: 0.45, blue: 0.48))
+        case (.noGo, .rain), (.noGo, .storm):
+            return (Color(red: 0.22, green: 0.26, blue: 0.32),
+                    Color(red: 0.38, green: 0.42, blue: 0.48))
+        }
+    }
+}
+
+private struct WeatherAtmosphericOverlay: View {
+    let condition: WeatherCondition
+
+    var body: some View {
+        ZStack {
+            primarySkyHighlight
+            cloudLayer
+            precipitationDarkening
+        }
+    }
+
+    private var primarySkyHighlight: some View {
+        let cfg = skyHighlightConfig
+        return RadialGradient(
+            colors: [.white.opacity(cfg.opacity), .clear],
+            center: UnitPoint(x: cfg.x, y: cfg.y),
+            startRadius: 0,
+            endRadius: cfg.radius
+        )
+    }
+
+    private var skyHighlightConfig: (x: CGFloat, y: CGFloat, opacity: Double, radius: CGFloat) {
+        switch condition {
+        case .clear:        return (0.72, 0.04, 0.55, 340)
+        case .partlyCloudy: return (0.68, 0.06, 0.42, 360)
+        case .cloudy:       return (0.50, 0.10, 0.24, 480)
+        case .overcast:     return (0.50, 0.15, 0.14, 540)
+        case .rain:         return (0.50, 0.08, 0.10, 380)
+        case .storm:        return (0.50, 0.05, 0.07, 320)
+        case .snow:         return (0.50, 0.08, 0.50, 600)
+        }
+    }
+
+    @ViewBuilder
+    private var cloudLayer: some View {
+        switch condition {
+        case .partlyCloudy:
+            ZStack {
+                EllipticalGradient(
+                    colors: [.white.opacity(0.22), .clear],
+                    center: UnitPoint(x: 0.22, y: 0.18),
+                    startRadiusFraction: 0,
+                    endRadiusFraction: 0.32
+                )
+                EllipticalGradient(
+                    colors: [.white.opacity(0.16), .clear],
+                    center: UnitPoint(x: 0.92, y: 0.30),
+                    startRadiusFraction: 0,
+                    endRadiusFraction: 0.26
+                )
+            }
+        case .cloudy, .overcast:
+            ZStack {
+                EllipticalGradient(
+                    colors: [.white.opacity(0.20), .clear],
+                    center: UnitPoint(x: 0.25, y: 0.12),
+                    startRadiusFraction: 0,
+                    endRadiusFraction: 0.48
+                )
+                EllipticalGradient(
+                    colors: [.white.opacity(0.16), .clear],
+                    center: UnitPoint(x: 0.82, y: 0.22),
+                    startRadiusFraction: 0,
+                    endRadiusFraction: 0.42
+                )
+            }
+        case .snow:
+            EllipticalGradient(
+                colors: [.white.opacity(0.18), .clear],
+                center: UnitPoint(x: 0.5, y: 0.18),
+                startRadiusFraction: 0,
+                endRadiusFraction: 0.55
+            )
+        case .clear, .rain, .storm:
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private var precipitationDarkening: some View {
+        switch condition {
+        case .rain:
+            LinearGradient(
+                colors: [.black.opacity(0.22), .clear],
+                startPoint: .top,
+                endPoint: UnitPoint(x: 0.5, y: 0.38)
+            )
+        case .storm:
+            LinearGradient(
+                colors: [.black.opacity(0.32), .clear],
+                startPoint: .top,
+                endPoint: UnitPoint(x: 0.5, y: 0.42)
+            )
+        default:
+            EmptyView()
+        }
     }
 }
 

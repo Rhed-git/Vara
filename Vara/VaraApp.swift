@@ -4,7 +4,7 @@ import SwiftUI
 struct VaraApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            LaunchGateView()
         }
     }
 }
