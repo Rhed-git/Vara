@@ -26,6 +26,15 @@ struct ContentView: View {
     private var rightNowCondition: WeatherCondition { rightNowDay.weatherCondition }
     private var selectedForecastCondition: WeatherCondition { selectedDay.weatherCondition }
     private var isViewingToday: Bool { selectedDayIndex == 0 }
+    private var preferredRideWindow: ActivityWindow {
+        ActivityWindow(label: "Your Preferred Window", timeRange: "5:00 PM - 8:00 PM")
+    }
+    private var rightNowRecommendation: ReadinessRecommendation {
+        ReadinessEngine.recommendation(
+            for: rightNowDay,
+            preferredWindow: preferredRideWindow
+        )
+    }
     private var rightNowConditionsSubtitle: String {
         "\(rightNowDay.high)°  ·  \(rightNowDay.condition)  ·  Tap for details"
     }
@@ -218,14 +227,13 @@ struct ContentView: View {
         case .readiness:
             activeHomeSheet(
                 title: section.title,
-                topSafe: topSafe,
-                weatherCondition: rightNowCondition,
-                verdict: rightNowDay.verdict
+                topSafe: topSafe
             ) {
-                HeroZone(day: rightNowDay, location: location, activity: selectedActivity,
+                HeroZone(day: rightNowDay, recommendation: rightNowRecommendation,
+                         location: location, activity: selectedActivity,
                          conditionsTitle: "Current Conditions", conditionsSubtitle: rightNowConditionsSubtitle,
                          progress: 0, topInset: 0,
-                         insightLimit: availableHeight < 520 ? 4 : 5,
+                         insightLimit: 5,
                          onConditionsTap: {
                              guard !isHomeSectionTransitioning && !isHomeDragActive else { return }
                              isShowingConditions = true
@@ -314,9 +322,13 @@ struct ContentView: View {
 
     private func expandedSectionTitle(_ title: String, topSafe: CGFloat) -> some View {
         HStack {
-            Text(title)
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(.white)
+            if title == HomeSection.readiness.title {
+                LiveRightNowTitle()
+            } else {
+                Text(title)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.white)
+            }
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 18)
@@ -353,8 +365,6 @@ struct ContentView: View {
         }
         .padding(.horizontal, 16)
     }
-
-    // MARK: 10-day forecast
 
     // MARK: 10-day forecast rows (header lives in LazyVStack as a pinned section header)
 
@@ -410,4 +420,40 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
+}
+
+private struct LiveRightNowTitle: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isPulsing = false
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Text("Right ")
+                .foregroundStyle(.white)
+            Text("Now")
+                .foregroundStyle(Color(red: 1.0, green: 0.28, blue: 0.22))
+                .opacity(reduceMotion ? 1.0 : (isPulsing ? 1.0 : 0.78))
+                .scaleEffect(reduceMotion ? 1.0 : (isPulsing ? 1.04 : 1.0))
+                .shadow(
+                    color: Color(red: 1.0, green: 0.28, blue: 0.22)
+                        .opacity(reduceMotion ? 0.0 : (isPulsing ? 0.25 : 0.12)),
+                    radius: reduceMotion ? 0 : 6,
+                    x: 0,
+                    y: 0
+                )
+                .animation(
+                    reduceMotion ? nil : .easeInOut(duration: 2.4).repeatForever(autoreverses: true),
+                    value: isPulsing
+                )
+        }
+        .font(.title3.weight(.semibold))
+        .accessibilityLabel("Right Now")
+        .onAppear {
+            guard !reduceMotion else { return }
+            isPulsing = true
+        }
+        .onChange(of: reduceMotion) { _, newValue in
+            isPulsing = !newValue
+        }
+    }
 }

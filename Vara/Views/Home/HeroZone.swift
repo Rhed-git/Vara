@@ -1,8 +1,6 @@
 import SwiftUI
 
 // MARK: - Hero Zone
-
-// MARK: - Hero Zone
 //
 // Readiness content for the home page: verdict → insights (what to expect /
 // down-time prep) → current conditions row. The section model now drives
@@ -15,6 +13,7 @@ import SwiftUI
 
 struct HeroZone: View {
     let day: DayForecast
+    let recommendation: ReadinessRecommendation
     let location: String
     let activity: Activity
     let conditionsTitle: String
@@ -23,13 +22,6 @@ struct HeroZone: View {
     let topInset: CGFloat
     let insightLimit: Int
     let onConditionsTap: () -> Void
-
-    private var insightsTitle: String {
-        switch day.verdict {
-        case .go, .caution: return "What to Expect"
-        case .noGo:         return "Down Time Prep"
-        }
-    }
 
     /// True once we're far enough into the collapse that only the compact
     /// verdict/headline bar should remain.
@@ -52,19 +44,26 @@ struct HeroZone: View {
     }
 
     var body: some View {
-        VStack(spacing: lerp(8, 6)) {
+        VStack(spacing: lerp(7, 5)) {
             decisionBlock
             if !isCondensed {
-                insightsBlock
-                    .opacity(fadeOut(by: 0.5))
-                    .transition(.opacity)
-                conditionsBlock
+                VStack(spacing: 8) {
+                    windowsBlock
+                    insightsBlock
+
+                    Spacer(minLength: 2)
+
+                    conditionsBlock
+                }
+                .frame(maxHeight: .infinity, alignment: .top)
+                .opacity(fadeOut(by: 0.5))
+                .transition(.opacity)
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.top, topInset + lerp(6, 4))
-        .padding(.bottom, 8)
-        .frame(maxWidth: .infinity, alignment: .top)
+        .padding(.horizontal, 18)
+        .padding(.top, topInset + lerp(4, 3))
+        .padding(.bottom, 7)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background {
             // Frosted backdrop fades in alongside collapse so the compact bar
             // reads clearly against the forecast scrolling underneath.
@@ -87,7 +86,7 @@ struct HeroZone: View {
     // MARK: Decision
 
     private var decisionBlock: some View {
-        VStack(spacing: lerp(8, 4)) {
+        VStack(spacing: lerp(5, 3)) {
             // Caption: location · activity (collapses height + opacity together).
             Text("\(location.uppercased())  ·  \(activity.rawValue.uppercased())")
                 .font(.caption.weight(.semibold))
@@ -104,18 +103,18 @@ struct HeroZone: View {
             // for a single-line "GO · Good to head out" badge style.
             HStack(spacing: 8) {
                 Circle()
-                    .fill(day.verdict.color)
+                    .fill(recommendation.verdict.color)
                     .frame(width: lerp(0, 8), height: lerp(0, 8))
                     .opacity(fadeIn(from: 0.35))
 
-                Text(day.verdict.rawValue)
-                    .font(.system(size: lerp(56, 15), weight: .bold))
-                    .tracking(day.verdict == .noGo ? -2 : 0)
+                Text(recommendation.verdict.rawValue)
+                    .font(.system(size: lerp(52, 15), weight: .bold))
+                    .tracking(recommendation.verdict == .noGo ? -2 : 0)
                     .foregroundStyle(.white)
                     .contentTransition(.numericText())
 
                 if isCondensed {
-                    Text(day.verdict.headline)
+                    Text(recommendation.headline)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.white)
                         .lineLimit(1)
@@ -127,43 +126,83 @@ struct HeroZone: View {
 
             // Centered headline only when expanded — condensed shares the line above.
             if !isCondensed {
-                Text(day.verdict.headline)
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                    .transition(.opacity)
+                VStack(spacing: 5) {
+                    Text(recommendation.confidence.rawValue.uppercased())
+                        .font(.caption2.weight(.bold))
+                        .tracking(1.1)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(recommendation.verdict.color.opacity(0.92), in: Capsule())
+                        .overlay(Capsule().stroke(.white.opacity(0.28), lineWidth: 0.5))
+
+                    Text(recommendation.headline)
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(1)
+                        .transition(.opacity)
+                }
             }
 
             // Summary fades + height collapses together so no leftover gap remains.
-            Text(day.verdict.summary)
+            Text(recommendation.summary)
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.88))
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 16)
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+                .padding(.horizontal, 10)
                 .fixedSize(horizontal: false, vertical: true)
                 .opacity(fadeOut(by: 0.45))
-                .frame(maxHeight: lerp(48, 0), alignment: .top)
+                .frame(maxHeight: lerp(24, 0), alignment: .top)
                 .clipped()
         }
+    }
+
+    // MARK: Windows
+
+    private var windowsBlock: some View {
+        VStack(spacing: 4) {
+            ActivityWindowRow(
+                window: recommendation.bestWindow,
+                verdict: recommendation.verdict,
+                statusText: "\(recommendation.verdict.rawValue) during this window"
+            )
+
+            if let preferredWindow = recommendation.preferredWindow {
+                PreferredWindowCompactRow(
+                    window: preferredWindow,
+                    verdict: recommendation.preferredWindowVerdict,
+                    statusText: preferredWindowStatusText
+                )
+            }
+        }
+    }
+
+    private var preferredWindowStatusText: String {
+        guard let verdict = recommendation.preferredWindowVerdict else {
+            return "No status yet"
+        }
+
+        return "\(verdict.rawValue) during this window"
     }
 
     // MARK: Insights
 
     private var insightsBlock: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(insightsTitle.uppercased())
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Why This Recommendation".uppercased())
                 .font(.caption.weight(.semibold))
                 .tracking(1.4)
                 .foregroundStyle(.white.opacity(0.78))
 
-            VStack(spacing: 5) {
-                ForEach(day.insights.prefix(max(1, insightLimit))) { insight in
-                    InsightRow(item: insight)
+            VStack(spacing: 4) {
+                ForEach(recommendation.reasons.prefix(max(1, min(insightLimit, 5)))) { reason in
+                    RecommendationReasonRow(reason: reason)
                 }
             }
         }
-        .padding(.top, 2)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -196,8 +235,8 @@ struct HeroZone: View {
                     .font(isCondensed ? .caption.weight(.bold) : .subheadline.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.65))
             }
-            .padding(.horizontal, isCondensed ? 0 : 4)
-            .padding(.vertical, lerp(10, 4))
+            .padding(.horizontal, isCondensed ? 0 : 2)
+            .padding(.vertical, lerp(5, 3))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -211,5 +250,113 @@ struct HeroZone: View {
                     .transition(.opacity)
             }
         }
+    }
+}
+
+private struct ActivityWindowRow: View {
+    let window: ActivityWindow
+    let verdict: Verdict?
+    let statusText: String
+
+    var body: some View {
+        HStack(spacing: 9) {
+            Image(systemName: "clock.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.88))
+                .frame(width: 16, height: 16)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(window.label)
+                    .font(.caption.weight(.semibold))
+                    .tracking(0.9)
+                    .foregroundStyle(.white.opacity(0.72))
+                Text(window.timeRange)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.white)
+                if let verdict {
+                    Text(statusText)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(verdict.color)
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(.white.opacity(0.18), lineWidth: 0.5)
+        )
+    }
+}
+
+private struct PreferredWindowCompactRow: View {
+    let window: ActivityWindow
+    let verdict: Verdict?
+    let statusText: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(window.label)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.78))
+                .lineLimit(1)
+
+            Text("·")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.55))
+
+            Text(window.timeRange)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+
+            if let verdict {
+                Text("·")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.55))
+                Text(verdict.rawValue)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(verdict.color)
+                    .lineLimit(1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 4)
+        .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(.white.opacity(0.14), lineWidth: 0.5)
+        )
+        .accessibilityLabel("\(window.label), \(window.timeRange), \(statusText)")
+    }
+}
+
+private struct RecommendationReasonRow: View {
+    let reason: RecommendationReason
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: reason.icon)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white)
+                .frame(width: 16, height: 16)
+            Text(reason.title)
+                .font(.caption)
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.86)
+            Spacer()
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 4)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .stroke(.white.opacity(0.18), lineWidth: 0.5)
+        )
     }
 }

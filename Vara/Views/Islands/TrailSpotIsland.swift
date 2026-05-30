@@ -1,8 +1,6 @@
 import SwiftUI
 
 // MARK: - Trail Spot Island
-
-// MARK: - Trail Spot Island
 //
 // Same frosted shell as ConditionsIsland, but the body is the spot's verdict
 // summary plus the list of insights (What to Expect for go/caution, Down Time
