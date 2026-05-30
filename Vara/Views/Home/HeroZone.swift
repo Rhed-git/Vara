@@ -44,26 +44,36 @@ struct HeroZone: View {
     }
 
     var body: some View {
-        VStack(spacing: lerp(7, 5)) {
-            decisionBlock
-            if !isCondensed {
-                VStack(spacing: 8) {
-                    windowsBlock
-                    insightsBlock
+        GeometryReader { geo in
+            let isCompactHeight = geo.size.height < 470
 
-                    Spacer(minLength: 2)
+            VStack(spacing: lerp(7, 5)) {
+                decisionBlock
+                if !isCondensed {
+                    VStack(spacing: 8) {
+                        if isCompactHeight {
+                            ScrollView {
+                                middleDetails(usesExpandedReasonRows: false)
+                            }
+                            .scrollIndicators(.hidden)
+                        } else {
+                            middleDetails(usesExpandedReasonRows: true)
+                        }
 
-                    conditionsBlock
+                        Spacer(minLength: 2)
+
+                        conditionsBlock
+                    }
+                    .frame(maxHeight: .infinity, alignment: .top)
+                    .opacity(fadeOut(by: 0.5))
+                    .transition(.opacity)
                 }
-                .frame(maxHeight: .infinity, alignment: .top)
-                .opacity(fadeOut(by: 0.5))
-                .transition(.opacity)
             }
+            .padding(.horizontal, 18)
+            .padding(.top, topInset + lerp(4, 3))
+            .padding(.bottom, 7)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        .padding(.horizontal, 18)
-        .padding(.top, topInset + lerp(4, 3))
-        .padding(.bottom, 7)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background {
             // Frosted backdrop fades in alongside collapse so the compact bar
             // reads clearly against the forecast scrolling underneath.
@@ -81,6 +91,13 @@ struct HeroZone: View {
                 .opacity(Double(progress))
         }
         .animation(.easeInOut(duration: 0.2), value: isCondensed)
+    }
+
+    private func middleDetails(usesExpandedReasonRows: Bool) -> some View {
+        VStack(spacing: usesExpandedReasonRows ? 9 : 6) {
+            windowsBlock
+            insightsBlock(usesExpandedRows: usesExpandedReasonRows)
+        }
     }
 
     // MARK: Decision
@@ -190,16 +207,16 @@ struct HeroZone: View {
 
     // MARK: Insights
 
-    private var insightsBlock: some View {
-        VStack(alignment: .leading, spacing: 4) {
+    private func insightsBlock(usesExpandedRows: Bool) -> some View {
+        VStack(alignment: .leading, spacing: usesExpandedRows ? 5 : 4) {
             Text("Why This Recommendation".uppercased())
                 .font(.caption.weight(.semibold))
                 .tracking(1.4)
                 .foregroundStyle(.white.opacity(0.78))
 
-            VStack(spacing: 4) {
+            VStack(spacing: usesExpandedRows ? 6 : 4) {
                 ForEach(recommendation.reasons.prefix(max(1, min(insightLimit, 5)))) { reason in
-                    RecommendationReasonRow(reason: reason)
+                    RecommendationReasonRow(reason: reason, isExpanded: usesExpandedRows)
                 }
             }
         }
@@ -337,25 +354,26 @@ private struct PreferredWindowCompactRow: View {
 
 private struct RecommendationReasonRow: View {
     let reason: RecommendationReason
+    let isExpanded: Bool
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: isExpanded ? 10 : 8) {
             Image(systemName: reason.icon)
-                .font(.caption.weight(.semibold))
+                .font(isExpanded ? .footnote.weight(.semibold) : .caption.weight(.semibold))
                 .foregroundStyle(.white)
-                .frame(width: 16, height: 16)
+                .frame(width: isExpanded ? 18 : 16, height: isExpanded ? 18 : 16)
             Text(reason.title)
-                .font(.caption)
+                .font(isExpanded ? .footnote : .caption)
                 .foregroundStyle(.white)
-                .lineLimit(1)
+                .lineLimit(isExpanded ? 2 : 1)
                 .minimumScaleFactor(0.86)
             Spacer()
         }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 4)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .padding(.horizontal, isExpanded ? 11 : 9)
+        .padding(.vertical, isExpanded ? 7 : 4)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: isExpanded ? 11 : 9, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
+            RoundedRectangle(cornerRadius: isExpanded ? 11 : 9, style: .continuous)
                 .stroke(.white.opacity(0.18), lineWidth: 0.5)
         )
     }
