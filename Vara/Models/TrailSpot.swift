@@ -1,6 +1,6 @@
 import Foundation
 
-enum SpotKind {
+enum SpotKind: String, Codable {
     case trail, park
 
     var label: String { self == .trail ? "TRAIL" : "PARK" }

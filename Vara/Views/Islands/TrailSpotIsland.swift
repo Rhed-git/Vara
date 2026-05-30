@@ -10,7 +10,14 @@ import SwiftUI
 
 struct TrailSpotIsland: View {
     let spot: TrailSpot
+    let favoritesStore: FavoritesStore?
     let onDismiss: () -> Void
+
+    init(spot: TrailSpot, favoritesStore: FavoritesStore? = nil, onDismiss: @escaping () -> Void) {
+        self.spot = spot
+        self.favoritesStore = favoritesStore
+        self.onDismiss = onDismiss
+    }
 
     private var insightsLabel: String {
         switch spot.verdict {
@@ -36,6 +43,7 @@ struct TrailSpotIsland: View {
         VStack(alignment: .leading, spacing: 0) {
             header
             verdictBlock
+            favoriteAction
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
@@ -131,5 +139,36 @@ struct TrailSpotIsland: View {
         }
         .padding(.horizontal, 22)
         .padding(.bottom, 14)
+    }
+
+    @ViewBuilder
+    private var favoriteAction: some View {
+        if let favoritesStore {
+            let isSaved = favoritesStore.isSaved(spot)
+
+            Button {
+                guard !isSaved else { return }
+                withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
+                    favoritesStore.save(spot)
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: isSaved ? "checkmark.circle.fill" : "star.fill")
+                        .font(.subheadline.weight(.semibold))
+                    Text(isSaved ? "Saved" : "Save to Favorites")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 11)
+                .background(.white.opacity(isSaved ? 0.14 : 0.20), in: Capsule())
+                .overlay(Capsule().stroke(.white.opacity(0.24), lineWidth: 0.5))
+            }
+            .buttonStyle(.plain)
+            .disabled(isSaved)
+            .padding(.horizontal, 22)
+            .padding(.bottom, 14)
+        }
     }
 }

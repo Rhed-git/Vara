@@ -20,7 +20,51 @@ enum MockData {
                   verdict: .noGo,    insights: spotInsights(for: .noGo)),
     ]
 
-    private static func spotInsights(for v: Verdict) -> [InsightItem] {
+    /// Saved trails and riding areas for the standalone Favorites page.
+    static let savedSpots: [TrailSpot] = [
+        TrailSpot(name: "Valmont Bike Park", kind: .park, detail: "Skills park · 3.2 mi away",
+                  verdict: .go, insights: spotInsights(for: .go)),
+        TrailSpot(name: "Marshall Mesa", kind: .trail, detail: "8.1 mi loop",
+                  verdict: .go, insights: spotInsights(for: .go)),
+        TrailSpot(name: "Betasso Preserve", kind: .trail, detail: "6.5 mi loop",
+                  verdict: .caution, insights: spotInsights(for: .caution)),
+        TrailSpot(name: "Buffalo Creek", kind: .trail, detail: "24 mi network",
+                  verdict: .go, insights: spotInsights(for: .go)),
+        TrailSpot(name: "Maryland Mountain", kind: .park, detail: "14 mi trail system",
+                  verdict: .caution, insights: spotInsights(for: .caution)),
+        TrailSpot(name: "Hall Ranch", kind: .trail, detail: "12 mi loop",
+                  verdict: .noGo, insights: spotInsights(for: .noGo)),
+    ]
+
+    /// Local mock discovery catalog used by Location search.
+    static let searchableSpots: [TrailSpot] = [
+        TrailSpot(name: "Valmont Bike Park", kind: .park, detail: "Boulder skills park · pump track and jump lines",
+                  verdict: .go, insights: spotInsights(for: .go)),
+        TrailSpot(name: "Marshall Mesa", kind: .trail, detail: "Boulder · 8.1 mi rolling loop",
+                  verdict: .go, insights: spotInsights(for: .go)),
+        TrailSpot(name: "Betasso Preserve", kind: .trail, detail: "Boulder Canyon · 6.5 mi singletrack loop",
+                  verdict: .caution, insights: spotInsights(for: .caution)),
+        TrailSpot(name: "Hall Ranch", kind: .trail, detail: "Lyons · 12 mi technical loop",
+                  verdict: .noGo, insights: spotInsights(for: .noGo)),
+        TrailSpot(name: "Heil Valley Ranch", kind: .trail, detail: "North Boulder · 7.8 mi out-and-back",
+                  verdict: .caution, insights: spotInsights(for: .caution)),
+        TrailSpot(name: "Buffalo Creek", kind: .trail, detail: "Pine · 24 mi riding area",
+                  verdict: .go, insights: spotInsights(for: .go)),
+        TrailSpot(name: "Maryland Mountain", kind: .park, detail: "Black Hawk · directional trail system",
+                  verdict: .caution, insights: spotInsights(for: .caution)),
+        TrailSpot(name: "Floyd Hill", kind: .trail, detail: "Evergreen · downhill flow and tech lines",
+                  verdict: .go, insights: spotInsights(for: .go)),
+        TrailSpot(name: "White Ranch", kind: .park, detail: "Golden · 18 mi trail network",
+                  verdict: .noGo, insights: spotInsights(for: .noGo)),
+        TrailSpot(name: "Apex Park", kind: .trail, detail: "Golden · steep technical singletrack",
+                  verdict: .caution, insights: spotInsights(for: .caution)),
+        TrailSpot(name: "Doudy Draw", kind: .trail, detail: "South Boulder · mellow connector riding",
+                  verdict: .go, insights: spotInsights(for: .go)),
+        TrailSpot(name: "Ruby Hill Bike Park", kind: .park, detail: "Denver · urban jump and skills park",
+                  verdict: .go, insights: spotInsights(for: .go)),
+    ]
+
+    static func spotInsights(for v: Verdict) -> [InsightItem] {
         switch v {
         case .go:
             return [

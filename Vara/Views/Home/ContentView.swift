@@ -6,6 +6,7 @@ struct ContentView: View {
     @State private var selectedDayIndex: Int = 0
     @State private var isShowingConditions: Bool = false
     @State private var selectedSpot: TrailSpot? = nil
+    @State private var favoritesStore = FavoritesStore()
     @State private var activeHomeSection: HomeSection = .readiness
     @State private var homeTransitionPulse: Bool = false
     @State private var isHomeSectionTransitioning: Bool = false
@@ -60,7 +61,7 @@ struct ContentView: View {
         }
         .overlay {
             if let spot = selectedSpot {
-                TrailSpotIsland(spot: spot) {
+                TrailSpotIsland(spot: spot, favoritesStore: favoritesStore) {
                     selectedSpot = nil
                 }
                 .zIndex(11)
@@ -103,8 +104,17 @@ struct ContentView: View {
         switch currentPage {
         case .home:
             homePage
+        case .favorites:
+            FavoritesPage(favoritesStore: favoritesStore) { spot in
+                selectedSpot = spot
+            }
         case .location:
-            LocationPage(location: $location)
+            LocationPage(
+                location: $location,
+                favoritesStore: favoritesStore
+            ) { spot in
+                selectedSpot = spot
+            }
         case .activity:
             ActivityPage(selectedActivity: $selectedActivity)
         case .preferences:

@@ -1,6 +1,6 @@
 import SwiftUI
 
-enum Verdict: String {
+enum Verdict: String, Codable {
     case go = "GO"
     case caution = "CAUTION"
     case noGo = "NO-GO"
