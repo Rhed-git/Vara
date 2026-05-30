@@ -44,36 +44,26 @@ struct HeroZone: View {
     }
 
     var body: some View {
-        GeometryReader { geo in
-            let isCompactHeight = geo.size.height < 470
-
-            VStack(spacing: lerp(7, 5)) {
-                decisionBlock
-                if !isCondensed {
-                    VStack(spacing: 8) {
-                        if isCompactHeight {
-                            ScrollView {
-                                middleDetails(usesExpandedReasonRows: false)
-                            }
-                            .scrollIndicators(.hidden)
-                        } else {
-                            middleDetails(usesExpandedReasonRows: true)
-                        }
-
-                        Spacer(minLength: 2)
-
-                        conditionsBlock
-                    }
-                    .frame(maxHeight: .infinity, alignment: .top)
+        VStack(spacing: lerp(6, 4)) {
+            decisionBlock
+            if !isCondensed {
+                bestWindowBlock
                     .opacity(fadeOut(by: 0.5))
                     .transition(.opacity)
-                }
+
+                reasonsBlock
+                    .opacity(fadeOut(by: 0.5))
+                    .transition(.opacity)
+
+                Spacer(minLength: 0)
+
+                conditionsBlock
             }
-            .padding(.horizontal, 18)
-            .padding(.top, topInset + lerp(4, 3))
-            .padding(.bottom, 7)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
+        .padding(.horizontal, 18)
+        .padding(.top, topInset + lerp(4, 3))
+        .padding(.bottom, 8)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background {
             // Frosted backdrop fades in alongside collapse so the compact bar
             // reads clearly against the forecast scrolling underneath.
@@ -91,13 +81,6 @@ struct HeroZone: View {
                 .opacity(Double(progress))
         }
         .animation(.easeInOut(duration: 0.2), value: isCondensed)
-    }
-
-    private func middleDetails(usesExpandedReasonRows: Bool) -> some View {
-        VStack(spacing: usesExpandedReasonRows ? 9 : 6) {
-            windowsBlock
-            insightsBlock(usesExpandedRows: usesExpandedReasonRows)
-        }
     }
 
     // MARK: Decision
@@ -143,80 +126,40 @@ struct HeroZone: View {
 
             // Centered headline only when expanded — condensed shares the line above.
             if !isCondensed {
-                VStack(spacing: 5) {
-                    Text(recommendation.confidence.rawValue.uppercased())
-                        .font(.caption2.weight(.bold))
-                        .tracking(1.1)
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .background(recommendation.verdict.color.opacity(0.92), in: Capsule())
-                        .overlay(Capsule().stroke(.white.opacity(0.28), lineWidth: 0.5))
-
-                    Text(recommendation.headline)
-                        .font(.headline.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(1)
-                        .transition(.opacity)
-                }
-            }
-
-            // Summary fades + height collapses together so no leftover gap remains.
-            Text(recommendation.summary)
-                .font(.subheadline)
-                .foregroundStyle(.white.opacity(0.88))
-                .multilineTextAlignment(.center)
-                .lineLimit(1)
-                .minimumScaleFactor(0.82)
-                .padding(.horizontal, 10)
-                .fixedSize(horizontal: false, vertical: true)
-                .opacity(fadeOut(by: 0.45))
-                .frame(maxHeight: lerp(24, 0), alignment: .top)
-                .clipped()
-        }
-    }
-
-    // MARK: Windows
-
-    private var windowsBlock: some View {
-        VStack(spacing: 4) {
-            ActivityWindowRow(
-                window: recommendation.bestWindow,
-                verdict: recommendation.verdict,
-                statusText: "\(recommendation.verdict.rawValue) during this window"
-            )
-
-            if let preferredWindow = recommendation.preferredWindow {
-                PreferredWindowCompactRow(
-                    window: preferredWindow,
-                    verdict: recommendation.preferredWindowVerdict,
-                    statusText: preferredWindowStatusText
-                )
+                Text(recommendation.confidence.rawValue.uppercased())
+                    .font(.caption2.weight(.bold))
+                    .tracking(1.1)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(recommendation.verdict.color.opacity(0.92), in: Capsule())
+                    .overlay(Capsule().stroke(.white.opacity(0.28), lineWidth: 0.5))
             }
         }
     }
 
-    private var preferredWindowStatusText: String {
-        guard let verdict = recommendation.preferredWindowVerdict else {
-            return "No status yet"
-        }
+    // MARK: Best Window
 
-        return "\(verdict.rawValue) during this window"
+    private var bestWindowBlock: some View {
+        ActivityWindowRow(
+            window: recommendation.bestWindow,
+            verdict: recommendation.verdict,
+            statusText: "\(recommendation.verdict.rawValue) during this window"
+        )
     }
 
-    // MARK: Insights
+    // MARK: Reasons
 
-    private func insightsBlock(usesExpandedRows: Bool) -> some View {
-        VStack(alignment: .leading, spacing: usesExpandedRows ? 5 : 4) {
+    private var reasonsBlock: some View {
+        VStack(alignment: .leading, spacing: 4) {
             Text("Why This Recommendation".uppercased())
                 .font(.caption.weight(.semibold))
                 .tracking(1.4)
                 .foregroundStyle(.white.opacity(0.78))
 
-            VStack(spacing: usesExpandedRows ? 6 : 4) {
-                ForEach(recommendation.reasons.prefix(max(1, min(insightLimit, 5)))) { reason in
-                    RecommendationReasonRow(reason: reason, isExpanded: usesExpandedRows)
+            VStack(spacing: 4) {
+                ForEach(recommendation.reasons.prefix(max(1, min(insightLimit, 3)))) { reason in
+                    RecommendationReasonRow(reason: reason)
                 }
             }
         }
@@ -309,71 +252,27 @@ private struct ActivityWindowRow: View {
     }
 }
 
-private struct PreferredWindowCompactRow: View {
-    let window: ActivityWindow
-    let verdict: Verdict?
-    let statusText: String
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Text(window.label)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.78))
-                .lineLimit(1)
-
-            Text("·")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.55))
-
-            Text(window.timeRange)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.white)
-                .lineLimit(1)
-
-            if let verdict {
-                Text("·")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.55))
-                Text(verdict.rawValue)
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(verdict.color)
-                    .lineLimit(1)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 9)
-        .padding(.vertical, 4)
-        .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(.white.opacity(0.14), lineWidth: 0.5)
-        )
-        .accessibilityLabel("\(window.label), \(window.timeRange), \(statusText)")
-    }
-}
-
 private struct RecommendationReasonRow: View {
     let reason: RecommendationReason
-    let isExpanded: Bool
 
     var body: some View {
-        HStack(spacing: isExpanded ? 10 : 8) {
+        HStack(spacing: 8) {
             Image(systemName: reason.icon)
-                .font(isExpanded ? .footnote.weight(.semibold) : .caption.weight(.semibold))
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(.white)
-                .frame(width: isExpanded ? 18 : 16, height: isExpanded ? 18 : 16)
+                .frame(width: 16, height: 16)
             Text(reason.title)
-                .font(isExpanded ? .footnote : .caption)
+                .font(.caption)
                 .foregroundStyle(.white)
-                .lineLimit(isExpanded ? 2 : 1)
+                .lineLimit(1)
                 .minimumScaleFactor(0.86)
             Spacer()
         }
-        .padding(.horizontal, isExpanded ? 11 : 9)
-        .padding(.vertical, isExpanded ? 7 : 4)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: isExpanded ? 11 : 9, style: .continuous))
+        .padding(.horizontal, 9)
+        .padding(.vertical, 4)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: isExpanded ? 11 : 9, style: .continuous)
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .stroke(.white.opacity(0.18), lineWidth: 0.5)
         )
     }
