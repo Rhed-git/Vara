@@ -9,9 +9,14 @@ struct LocationPage: View {
     let onSpotTap: (TrailSpot) -> Void
 
     @State private var searchText: String = ""
+    @FocusState private var isSearchFocused: Bool
 
     private var trimmedSearchText: String {
         searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var suggestedSpots: ArraySlice<TrailSpot> {
+        MockData.searchableSpots.prefix(6)
     }
 
     private var searchResults: [TrailSpot] {
@@ -30,54 +35,65 @@ struct LocationPage: View {
 
             searchField
 
-            GlassCard {
-                LocationRow(
-                    name: "Use Current Location",
-                    icon: "location.fill",
-                    isSelected: false,
-                    accent: true
-                )
-                .onTapGesture {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                        location = "Current Location"
-                    }
-                }
-            }
+            currentLocationAction
 
             if trimmedSearchText.isEmpty {
-                discoveryPrompt
+                PageSectionHeader(title: "Suggested places")
+                spotCards(suggestedSpots)
             } else if searchResults.isEmpty {
                 noResultsState
             } else {
                 PageSectionHeader(title: "Results")
-                VStack(spacing: 10) {
-                    ForEach(searchResults) { spot in
-                        LocationResultCard(
-                            spot: spot,
-                            isSaved: favoritesStore.isSaved(spot),
-                            onTap: {
-                                location = spot.name
-                                onSpotTap(spot)
-                            },
-                            onSave: {
-                                withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
-                                    favoritesStore.save(spot)
-                                }
-                            }
-                        )
-                    }
-                }
-                .padding(.horizontal, 20)
+                spotCards(searchResults)
             }
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            isSearchFocused = false
         }
         .sensoryFeedback(.selection, trigger: location)
         .sensoryFeedback(.selection, trigger: favoritesStore.spots.count)
     }
 
+    private func spotCards<S: RandomAccessCollection>(_ spots: S) -> some View where S.Element == TrailSpot {
+        VStack(spacing: 10) {
+            ForEach(Array(spots)) { spot in
+                LocationResultCard(
+                    spot: spot,
+                    isSaved: favoritesStore.isSaved(spot),
+                    onTap: {
+                        openSpot(spot)
+                    },
+                    onSave: {
+                        saveSpot(spot)
+                    }
+                )
+            }
+        }
+        .padding(.horizontal, 20)
+    }
+
+    private func openSpot(_ spot: TrailSpot) {
+        isSearchFocused = false
+        location = spot.name
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            onSpotTap(spot)
+        }
+    }
+
+    private func saveSpot(_ spot: TrailSpot) {
+        isSearchFocused = false
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
+            favoritesStore.save(spot)
+        }
+    }
+
     private var searchField: some View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
-                .foregroundStyle(.white.opacity(0.7))
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.8))
 
             TextField(
                 "",
@@ -88,28 +104,66 @@ struct LocationPage: View {
             .foregroundStyle(.white)
             .tint(.white)
             .textInputAutocapitalization(.words)
+            .submitLabel(.search)
+            .focused($isSearchFocused)
+            .onSubmit {
+                isSearchFocused = false
+            }
 
             if !searchText.isEmpty {
                 Button {
                     searchText = ""
+                    isSearchFocused = false
                 } label: {
                     Image(systemName: "xmark.circle.fill")
+                        .font(.body.weight(.semibold))
                         .foregroundStyle(.white.opacity(0.6))
                 }
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay(Capsule().stroke(.white.opacity(0.2), lineWidth: 0.5))
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(.white.opacity(isSearchFocused ? 0.34 : 0.2), lineWidth: 0.5)
+        )
+        .shadow(color: .black.opacity(0.16), radius: 14, x: 0, y: 6)
         .padding(.horizontal, 20)
     }
 
-    private var discoveryPrompt: some View {
-        LocationMessageCard(
-            icon: "magnifyingglass",
-            title: "Search for a trail, park, or riding area."
-        )
+    private var currentLocationAction: some View {
+        Button {
+            isSearchFocused = false
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                location = "Current Location"
+            }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "location.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color(red: 0.62, green: 0.88, blue: 1.0))
+
+                Text("Use Current Location")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color(red: 0.62, green: 0.88, blue: 1.0))
+
+                Spacer(minLength: 0)
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white.opacity(0.46))
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(.white.opacity(0.16), lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(PressScaleButtonStyle())
+        .padding(.horizontal, 20)
     }
 
     private var noResultsState: some View {
@@ -213,39 +267,6 @@ private struct LocationMessageCard: View {
                 .stroke(.white.opacity(0.18), lineWidth: 0.5)
         )
         .padding(.horizontal, 20)
-    }
-}
-
-private struct LocationRow: View {
-    let name: String
-    let icon: String
-    let isSelected: Bool
-    let accent: Bool
-
-    var body: some View {
-        HStack(spacing: 14) {
-            Image(systemName: icon)
-                .font(.body)
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(accent ? Color(red: 0.62, green: 0.88, blue: 1.0) : .white)
-                .frame(width: 28)
-
-            Text(name)
-                .font(.body)
-                .foregroundStyle(accent ? Color(red: 0.62, green: 0.88, blue: 1.0) : .white)
-
-            Spacer()
-
-            if isSelected {
-                Image(systemName: "checkmark")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .transition(.scale.combined(with: .opacity))
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .contentShape(Rectangle())
     }
 }
 

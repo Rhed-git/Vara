@@ -27,19 +27,22 @@ struct TrailSpotIsland: View {
     }
 
     var body: some View {
-        ZStack {
-            Color.black.opacity(0.42)
-                .ignoresSafeArea()
-                .contentShape(Rectangle())
-                .onTapGesture { onDismiss() }
-                .transition(.opacity)
+        GeometryReader { geo in
+            ZStack {
+                Color.black.opacity(0.42)
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture { onDismiss() }
+                    .transition(.opacity)
 
-            island
-                .transition(.scale(scale: 0.92).combined(with: .opacity))
+                island(maxHeight: geo.size.height * 0.72)
+                    .transition(.scale(scale: 0.92).combined(with: .opacity))
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
-    private var island: some View {
+    private func island(maxHeight: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             header
             verdictBlock
@@ -63,8 +66,9 @@ struct TrailSpotIsland: View {
                 .padding(.bottom, 22)
             }
             .scrollIndicators(.hidden)
+            .scrollDismissesKeyboard(.interactively)
         }
-        .frame(maxWidth: 420)
+        .frame(maxWidth: 420, maxHeight: maxHeight)
         .background(islandBackground)
         .overlay(
             RoundedRectangle(cornerRadius: 28, style: .continuous)
@@ -72,9 +76,8 @@ struct TrailSpotIsland: View {
         )
         .shadow(color: .black.opacity(0.55), radius: 30, x: 0, y: 18)
         .padding(.horizontal, 22)
-        // Same top/bottom padding as ConditionsIsland so it never covers the pill.
-        .padding(.top, 60)
-        .padding(.bottom, 120)
+        .padding(.top, 48)
+        .padding(.bottom, 96)
     }
 
     private var islandBackground: some View {
